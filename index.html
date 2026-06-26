@@ -55,6 +55,36 @@ const sleep = ms => new Promise(r=>setTimeout(r,ms));
 // count against the budget) from truncating multi-section answers.
 const MAX_NARRATIVE = 8000;
 
+// ─── LOCKED OUTPUT FORMAT ─────────────────────────────────────────────────────
+// One shared spec so every tab produces the same shape every run: balanced length,
+// tables for hard data, short prose for explanation, fixed closing sections.
+const FORMAT_RULES = [
+  "",
+  "FORMATTING RULES — apply these exactly on every response:",
+  "- Output ONLY the section headings listed above, each prefixed with '## ', in the exact order given. Do not add, remove, rename, or reorder sections. Write nothing before the first heading or after the last section.",
+  "- Balanced length: at most 2-4 sentences OR 3-5 bullet points per prose section. Be specific with real numbers and briefly explain any jargon in plain English.",
+  "- Put hard data — financials, metrics, multi-point timelines — in a Markdown table rather than prose, using this exact syntax:",
+  "| Column | Column |",
+  "| --- | --- |",
+  "- If a figure isn't available, write \"n/a\" rather than guessing.",
+].join("\n");
+
+// Compose a system prompt: a role line, the tab's sections, then the two fixed closers.
+function buildSys(role, sections) {
+  const body = sections.map(s => "## "+s.h + (s.d ? "\n"+s.d : "")).join("\n");
+  return [
+    role,
+    "",
+    "Structure your answer with EXACTLY these sections, in this order:",
+    body,
+    "## Key Numbers",
+    "A Markdown table (columns: | Metric | Value |) of the 3-5 most important figures for this query.",
+    "## What to Watch Next",
+    "Exactly ONE sentence on the single most important thing to monitor next.",
+    FORMAT_RULES,
+  ].join("\n");
+}
+
 function friendlyError(status, err) {
   const msg = (err && err.message) || "Unknown error";
   if (status===401) return "Your API key was rejected (401). Check it is correct and that the account has credit.";
@@ -682,8 +712,16 @@ function MoverPanel({ apiKey }) {
     setLoading(true);setError(null);setResult(null);setSources(null);setTs(null);
     try{
       const pd=dateFrom&&dateTo?"from "+dateFrom+" to "+dateTo:dateFrom?"from "+dateFrom+" to today":dateTo?"up to "+dateTo:"over the past month";
-      const sys="You are a patient investment educator helping a young adult (18+) learn to invest.\nExplain clearly; use real numbers. Structure with these exact headings:\n## Price Performance Summary\n## Timeline of Key Events\n## The Dominant Themes\n## What This Tells Us About the Business\n## What an Investor Should Think About Now\n## One Thing to Watch Next\nExplain any jargon.";
-      const usr="Analyse the stock price movement for "+tk.toUpperCase()+" "+pd+". Search for significant news, earnings, analyst changes, macro events. Give a clear chronological explanation an 18-year-old learning to invest would find useful.";
+      const sys=buildSys(
+        "You are a patient investment educator helping a young adult (18+) learn to invest. You are explaining why a stock's price moved over a period.",
+        [
+          {h:"What Happened", d:"1-2 sentences summarising the overall move and its size (% change, key price levels)."},
+          {h:"Timeline of Key Events", d:"A Markdown table, columns: | Date | Event | Effect on price |. Include the 4-7 most important dated events in the period."},
+          {h:"The Main Drivers", d:"2-4 sentences on the dominant themes behind the move."},
+          {h:"What It Means for the Business", d:"2-4 sentences on what this says about the company's fundamentals."},
+        ]
+      );
+      const usr="Analyse the stock price movement for "+tk.toUpperCase()+" "+pd+". Search for significant news, earnings, analyst changes, and macro events. Follow the required section format exactly.";
       const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult);
       const now=Date.now();
       setResult(text);setSources(src);setTs(now);
@@ -737,24 +775,19 @@ function ResearchPanel({ apiKey }) {
     if(!tk)return;
     setLoading(true);setError(null);setResult(null);setSources(null);setTs(null);
     try{
-      const sys=[
-        "You are a patient investment educator helping an 18-year-old learn to invest.",
-        "Be thorough but clear. Use real current figures. Structure with these exact headings:",
-        "## What Does This Company Actually Do",
-        "## How It Makes Money (Business Model)",
-        "## Recent Financial Health (Revenue, Profit, Growth)",
-        "In THIS section, present the headline figures as a Markdown table FIRST, using exactly this format:",
-        "| Metric | Most Recent | Year Ago | Change |",
-        "| --- | --- | --- | --- |",
-        "Include rows for: Revenue, Gross margin, Operating income, Net income, Diluted EPS, and Free cash flow (use the latest reported full year or trailing-twelve-months; write \"n/a\" if a figure isn't available). Put the % or absolute change in the Change column.",
-        "After the table, add 2-3 sentences of plain-English interpretation of what the numbers show.",
-        "## Competitive Position — Who Are the Rivals?",
-        "## Key Risks",
-        "## What the Market Currently Thinks (valuation, analyst sentiment)",
-        "## Verdict — Is This an Interesting Investment to Learn From?",
-        "Be specific with numbers. Explain any jargon. Complete EVERY section fully — do not stop mid-section or run out before the Verdict.",
-      ].join("\n");
-      const usr="Research "+tk.toUpperCase()+" as an investment. Find latest earnings, revenue growth, competitive position, valuation multiples, analyst views. Write a complete profile for a young investor. Make sure you finish all sections through to the Verdict.";
+      const sys=buildSys(
+        "You are a patient investment educator helping an 18-year-old learn to invest. You are profiling a company as a potential investment.",
+        [
+          {h:"What the Company Does", d:"2-4 sentences."},
+          {h:"How It Makes Money", d:"2-4 sentences on the business model and main revenue sources."},
+          {h:"Financial Health", d:"A Markdown table FIRST, columns: | Metric | Most Recent | Year Ago | Change |, with rows for Revenue, Gross margin, Operating income, Net income, Diluted EPS, and Free cash flow (latest full year or trailing-twelve-months). Then 2-3 sentences interpreting what the numbers show."},
+          {h:"Competitive Position", d:"2-4 sentences naming the main rivals and where this company stands."},
+          {h:"Key Risks", d:"3-4 short bullet points."},
+          {h:"Valuation & Market View", d:"A short Markdown table (columns: | Measure | Value |) covering P/E, P/S, and analyst sentiment, then 1-2 sentences of context."},
+          {h:"Verdict", d:"2-4 sentences — is this an interesting company to learn from, and why."},
+        ]
+      );
+      const usr="Research "+tk.toUpperCase()+" as an investment. Find latest earnings, revenue growth, competitive position, valuation multiples, and analyst views. Follow the required section format exactly.";
       const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult);
       const now=Date.now();setResult(text);setSources(src);setTs(now);
       LS.set(STORAGE_KEYS.research,{ticker:tk,result:text,sources:src,ts:now});
@@ -801,23 +834,19 @@ function ComparePanel({ apiKey }) {
     const A=tickerA.toUpperCase(), B=tickerB.toUpperCase();
     setLoading(true);setError(null);setResult(null);setSources(null);setTs(null);
     try{
-      const sys=[
-        "You are a patient investment educator helping an 18-year-old compare stocks.",
-        "Structure with these exact headings:",
-        "## Side-by-Side Snapshot (key metrics)",
-        "In THIS section, present the comparison as a Markdown table FIRST, using exactly this format:",
-        "| Metric | "+A+" | "+B+" |",
-        "| --- | --- | --- |",
-        "Include rows for: Market cap, Revenue (latest FY), Revenue growth, Gross margin, Operating margin, Net income, P/E, P/S, and Free cash flow (write \"n/a\" if unavailable).",
-        "## Business Model Comparison",
-        "## Growth and Financials",
-        "## Valuation — Which Looks Cheaper and Why",
-        "## Risk Profile",
-        "## Who Has the Stronger Competitive Moat?",
-        "## Which Might Be More Interesting to a Young Investor, and Why?",
-        "Be specific with numbers. Explain financial terms. Complete every section fully.",
-      ].join("\n");
-      const usr="Compare "+A+" vs "+B+" as investments. Search for latest data — revenue growth, profit margins, P/E or P/S ratios, competitive position, recent news.";
+      const sys=buildSys(
+        "You are a patient investment educator helping an 18-year-old compare two stocks: "+A+" and "+B+".",
+        [
+          {h:"Snapshot", d:"A Markdown table, columns: | Metric | "+A+" | "+B+" |, with rows for Market cap, Revenue (latest FY), Revenue growth, Gross margin, Operating margin, Net income, P/E, P/S, and Free cash flow."},
+          {h:"Business Models", d:"2-4 sentences contrasting how each company makes money."},
+          {h:"Growth & Financials", d:"2-4 sentences on how their growth and profitability compare."},
+          {h:"Valuation", d:"2-4 sentences on which looks cheaper and why."},
+          {h:"Risks", d:"2-3 short bullets for each company."},
+          {h:"Moat — Who's Stronger", d:"2-4 sentences."},
+          {h:"Which Is More Interesting for a Young Investor", d:"2-4 sentences with a clear pick and the reasoning."},
+        ]
+      );
+      const usr="Compare "+A+" vs "+B+" as investments. Search for latest data — revenue growth, profit margins, P/E or P/S ratios, competitive position, recent news. Follow the required section format exactly.";
       const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult);
       const now=Date.now();setResult(text);setSources(src);setTs(now);
       LS.set(STORAGE_KEYS.compare,{tickerA,tickerB,result:text,sources:src,ts:now});
@@ -907,32 +936,38 @@ function ChainPanel({ apiKey }) {
         "The canonical stage list for the "+industry+" industry is:",
         stageList,
         "",
-        "Write a detailed breakdown covering EVERY stage — in order, no gaps, no renaming.",
+        "Write a breakdown covering EVERY stage — in order, no gaps, no renaming. Keep each stage tight.",
         "For each stage use EXACTLY this format:",
         "",
         "**Stage N: [Name from canonical list]**",
-        "What happens: [Two clear sentences.]",
+        "What happens: [1-2 sentences, no more.]",
         "Key companies: [TICKER — Company Name | TICKER — Company Name | TICKER — Company Name]",
-        "Investor angle: [One to two sentences on why this stage is or is not an interesting investment.]",
+        "Investor angle: [ONE sentence on why this stage is or isn't an interesting investment.]",
         "---",
         "",
-        "After ALL stages, write these four sections:",
+        "After ALL stages, write these sections (each 2-4 sentences or a short table — no more):",
         "",
         "## Where the Pricing Power Sits",
-        "[Which stage(s) control margins and exactly why — patents, scarcity, switching costs. Quote margin ranges.]",
+        "[Which stage(s) control margins and why. Quote margin ranges.]",
         "",
         "## Hidden Gems — Less-Obvious Investment Angles",
         "[2-3 companies in overlooked stages. For each: TICKER, stage, why interesting, one risk.]",
         "",
-        "## Best Stages to Invest In Right Now — and Why",
-        "[Rank the top 2-3 stages as investment opportunities for a long-term young investor. For each: stage name, why attractive now, one named stock to research, one reason to be cautious. Be specific and opinionated.]",
+        "## Best Stages to Invest In Right Now",
+        "[Rank the top 2-3 stages. For each: stage name, why attractive now, one named stock, one caution. Be specific and opinionated.]",
         "",
         "## How to Think About This as an Investor",
-        "[Practical framework: what questions to ask, what signals to look for when choosing which part of the chain to back.]",
+        "[A short practical framework: what to ask and what signals to look for.]",
         "",
-        "CRITICAL: Use only stage names and numbers from the canonical list. Do not skip any stage. Do not stop early.",
+        "## Key Numbers",
+        "A Markdown table (columns: | Metric | Value |) of 3-5 headline industry figures (e.g. market size, growth rate, highest-margin stage).",
+        "",
+        "## What to Watch Next",
+        "Exactly ONE sentence on the most important thing to monitor in this industry.",
+        "",
+        "Use only stage names and numbers from the canonical list. Cover every stage but stay concise. Put company lists and figures in tables where it helps.",
       ].join("\n");
-      const writtenUsr="Write the complete stage-by-stage breakdown for ALL "+industry+" industry stages listed above, then the four analysis sections. Search for real current company data. Cover every stage. Do not stop early.";
+      const writtenUsr="Write the concise stage-by-stage breakdown for ALL "+industry+" industry stages listed above, then the analysis and closing sections. Search for real current company data. Cover every stage but keep each one tight, and follow the required format exactly.";
       const {text,sources:src}=await callClaude(apiKey,writtenSys,writtenUsr,MAX_NARRATIVE,true,setResult);
       const now=Date.now();
       setResult(text);setSources(src);setTs(now);
@@ -947,8 +982,17 @@ function ChainPanel({ apiKey }) {
     setFocusLoading(true);setFocusResult(null);setFocusSources(null);
     try{
       const T=tk.toUpperCase();
-      const sys="You are helping a young investor drill into a specific company in an industry chain.\nBe specific and educational. Use these headings:\n## Where "+T+" Sits in the Chain\n## What Makes This Position Interesting (or not)\n## Key Financials and Recent Performance\n## How Exposed Is It to the Rest of the Chain?\n## Should This Be on a Watch List?";
-      const usr="Drill into "+T+" as part of the "+industry+" value chain. Search for current information — its specific role, recent financials, news, competitive position. Write for a young investor.";
+      const sys=buildSys(
+        "You are helping a young investor evaluate "+T+" as part of the "+industry+" value chain.",
+        [
+          {h:"Where "+T+" Sits in the Chain", d:"2-4 sentences."},
+          {h:"Why This Position Is (or Isn't) Attractive", d:"2-4 sentences."},
+          {h:"Financials & Recent Performance", d:"A short Markdown table (columns: | Metric | Value |) of the key figures, then 1-2 sentences."},
+          {h:"Exposure to the Rest of the Chain", d:"2-4 sentences on dependencies on suppliers, customers, or other stages."},
+          {h:"Watch-List Verdict", d:"2-4 sentences."},
+        ]
+      );
+      const usr="Drill into "+T+" as part of the "+industry+" value chain. Search for current information — its specific role, recent financials, news, competitive position. Follow the required section format exactly.";
       const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setFocusResult);
       setFocusResult(text);setFocusSources(src);
     }catch(e){setFocusResult("Error: "+e.message);}
