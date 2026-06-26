@@ -30,10 +30,19 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
     if (request.method !== "POST")   return json({ error: { message: "Method not allowed" } }, 405, cors);
 
-    // Shared-password gate
-    const code = request.headers.get("x-access-code") || "";
-    if (!env.ACCESS_PASSWORD || code !== env.ACCESS_PASSWORD) {
-      return json({ error: { message: "Wrong or missing access password." } }, 401, cors);
+    // Distinct diagnostics so misconfiguration is obvious (no secrets are ever echoed).
+    const expected = (env.ACCESS_PASSWORD || "").trim();
+    if (!expected) {
+      return json({ error: { message: "Server has no ACCESS_PASSWORD secret. Add it under the Worker's Settings → Variables and Secrets, then Deploy." } }, 500, cors);
+    }
+    if (!env.ANTHROPIC_API_KEY) {
+      return json({ error: { message: "Server has no ANTHROPIC_API_KEY secret. Add it under the Worker's Settings → Variables and Secrets, then Deploy." } }, 500, cors);
+    }
+
+    // Shared-password gate (trim both sides — a stray space/newline in the secret is a common gotcha).
+    const code = (request.headers.get("x-access-code") || "").trim();
+    if (code !== expected) {
+      return json({ error: { message: "Wrong access password." } }, 401, cors);
     }
 
     let body;
