@@ -50,6 +50,11 @@ const STORAGE_KEYS = {
 // ─── ANTHROPIC API ────────────────────────────────────────────────────────────
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
+// max_tokens is a CEILING, not a target — the model only emits what it needs, so
+// a high cap costs nothing extra but prevents web-search overhead (tool-use blocks
+// count against the budget) from truncating multi-section answers.
+const MAX_NARRATIVE = 8000;
+
 function friendlyError(status, err) {
   const msg = (err && err.message) || "Unknown error";
   if (status===401) return "Your API key was rejected (401). Check it is correct and that the account has credit.";
@@ -679,7 +684,7 @@ function MoverPanel({ apiKey }) {
       const pd=dateFrom&&dateTo?"from "+dateFrom+" to "+dateTo:dateFrom?"from "+dateFrom+" to today":dateTo?"up to "+dateTo:"over the past month";
       const sys="You are a patient investment educator helping a young adult (18+) learn to invest.\nExplain clearly; use real numbers. Structure with these exact headings:\n## Price Performance Summary\n## Timeline of Key Events\n## The Dominant Themes\n## What This Tells Us About the Business\n## What an Investor Should Think About Now\n## One Thing to Watch Next\nExplain any jargon.";
       const usr="Analyse the stock price movement for "+tk.toUpperCase()+" "+pd+". Search for significant news, earnings, analyst changes, macro events. Give a clear chronological explanation an 18-year-old learning to invest would find useful.";
-      const {text,sources:src}=await callClaude(apiKey,sys,usr,2500,true,setResult);
+      const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult);
       const now=Date.now();
       setResult(text);setSources(src);setTs(now);
       LS.set(STORAGE_KEYS.movers,{ticker:tk,dateFrom,dateTo,result:text,sources:src,ts:now});
@@ -750,7 +755,7 @@ function ResearchPanel({ apiKey }) {
         "Be specific with numbers. Explain any jargon. Complete EVERY section fully — do not stop mid-section or run out before the Verdict.",
       ].join("\n");
       const usr="Research "+tk.toUpperCase()+" as an investment. Find latest earnings, revenue growth, competitive position, valuation multiples, analyst views. Write a complete profile for a young investor. Make sure you finish all sections through to the Verdict.";
-      const {text,sources:src}=await callClaude(apiKey,sys,usr,4000,true,setResult);
+      const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult);
       const now=Date.now();setResult(text);setSources(src);setTs(now);
       LS.set(STORAGE_KEYS.research,{ticker:tk,result:text,sources:src,ts:now});
     }catch(e){setError(e.message);}finally{setLoading(false);}
@@ -813,7 +818,7 @@ function ComparePanel({ apiKey }) {
         "Be specific with numbers. Explain financial terms. Complete every section fully.",
       ].join("\n");
       const usr="Compare "+A+" vs "+B+" as investments. Search for latest data — revenue growth, profit margins, P/E or P/S ratios, competitive position, recent news.";
-      const {text,sources:src}=await callClaude(apiKey,sys,usr,8000,true,setResult);
+      const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult);
       const now=Date.now();setResult(text);setSources(src);setTs(now);
       LS.set(STORAGE_KEYS.compare,{tickerA,tickerB,result:text,sources:src,ts:now});
     }catch(e){setError(e.message);}finally{setLoading(false);}
@@ -928,7 +933,7 @@ function ChainPanel({ apiKey }) {
         "CRITICAL: Use only stage names and numbers from the canonical list. Do not skip any stage. Do not stop early.",
       ].join("\n");
       const writtenUsr="Write the complete stage-by-stage breakdown for ALL "+industry+" industry stages listed above, then the four analysis sections. Search for real current company data. Cover every stage. Do not stop early.";
-      const {text,sources:src}=await callClaude(apiKey,writtenSys,writtenUsr,4000,true,setResult);
+      const {text,sources:src}=await callClaude(apiKey,writtenSys,writtenUsr,MAX_NARRATIVE,true,setResult);
       const now=Date.now();
       setResult(text);setSources(src);setTs(now);
       LS.set(STORAGE_KEYS.chain,{industry,chainData:parsedData,result:text,sources:src,ts:now});
@@ -944,7 +949,7 @@ function ChainPanel({ apiKey }) {
       const T=tk.toUpperCase();
       const sys="You are helping a young investor drill into a specific company in an industry chain.\nBe specific and educational. Use these headings:\n## Where "+T+" Sits in the Chain\n## What Makes This Position Interesting (or not)\n## Key Financials and Recent Performance\n## How Exposed Is It to the Rest of the Chain?\n## Should This Be on a Watch List?";
       const usr="Drill into "+T+" as part of the "+industry+" value chain. Search for current information — its specific role, recent financials, news, competitive position. Write for a young investor.";
-      const {text,sources:src}=await callClaude(apiKey,sys,usr,2500,true,setFocusResult);
+      const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setFocusResult);
       setFocusResult(text);setFocusSources(src);
     }catch(e){setFocusResult("Error: "+e.message);}
     finally{setFocusLoading(false);}
