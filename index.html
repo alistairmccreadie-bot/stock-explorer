@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Stock Explorer — Investment Learning Tool</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet"/>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0d0f14;--surface:#161a23;--surface2:#1e2433;--border:#2a3147;
+    --accent:#4f8ef7;--accent2:#34d399;--accent3:#f59e0b;
+    --text:#e8eaf0;--text-muted:#8892a4;--text-dim:#5a6478;
+    --danger:#f87171;--success:#34d399;--radius:12px;--radius-sm:8px;
+  }
+  html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif}
+  #root{min-height:100%}
+  input[type=date]::-webkit-calendar-picker-indicator{filter:invert(0.6)}
+  ::-webkit-scrollbar{width:6px;height:6px}
+  ::-webkit-scrollbar-track{background:var(--surface)}
+  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useCallback, useEffect, useRef } = React;
+
+// ─── STORAGE HELPERS ──────────────────────────────────────────────────────────
+const LS = {
+  get: (k, def=null) => { try { const v=localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch { return def; } },
+  set: (k, v)        => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  del: (k)           => { try { localStorage.removeItem(k); } catch {} },
+};
+
+const STORAGE_KEYS = {
+  apiKey:    "sx_api_key",
+  movers:    "sx_last_movers",
+  research:  "sx_last_research",
+  compare:   "sx_last_compare",
+  chain:     "sx_last_chain",
+};
+
+// ─── ANTHROPIC API ────────────────────────────────────────────────────────────
+async function callClaude(apiKey, sys, usr, maxTokens, useSearch) {
+  const body = {
+    model: "claude-sonnet-4-6",
+    max_tokens: maxTokens || 1200,
+    system: sys,
+    messages: [{ role:"user", content:usr }],
+  };
+  if (useSearch !== false) body.tools = [{ type:"web_search_20250305", name:"web_search" }];
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type":"application/json", "x-api-key":apiKey, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message);
+  return data.content.filter(b=>b.type==="text").map(b=>b.text).join("\n");
+}
+
+// ─── API KEY GATE ─────────────────────────────────────────────────────────────
+function ApiKeyGate({ onKey }) {
+  const [val, setVal]     = useState("");
+  const [err, setErr]     = useState(null);
+  const [testing, setT]   = useState(false);
+
+  const submit = async () => {
+    const k = val.trim();
+    if (!k.startsWith("sk-ant-")) { setErr("Key should start with sk-ant-"); return; }
+    setT(true); setErr(null);
+    try {
+      await callClaude(k, "You are a test.", "Reply with the single word: ready", 10, false);
+      LS.set(STORAGE_KEYS.apiKey, k);
+      onKey(k);
+    } catch(e) { setErr("Could not verify key: " + e.message); }
+    finally { setT(false); }
+  };
+
+  return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
+      <div style={{maxWidth:480,width:"100%",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:16,padding:40}}>
+        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:11,fontWeight:700,letterSpacing:".15em",textTransform:"uppercase",color:"var(--accent)",marginBottom:12}}>
+          Investment Learning Tool
+        </div>
+        <h1 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:26,fontWeight:700,marginBottom:8,letterSpacing:"-.02em"}}>
+          Stock <span style={{color:"var(--accent2)"}}>Explorer</span>
+        </h1>
+        <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.6,marginBottom:32}}>
+          Enter your Anthropic API key to get started. Your key is saved in this browser only — it never leaves your device.
+        </p>
+
+        <div style={{marginBottom:8}}>
+          <label style={{fontSize:12,color:"var(--text-muted)",display:"block",marginBottom:6}}>Anthropic API Key</label>
+          <input
+            type="password"
+            placeholder="sk-ant-api03-..."
+            value={val}
+            onChange={e=>setVal(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&submit()}
+            style={{width:"100%",background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:8,color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none"}}
+          />
+        </div>
+        {err && <div style={{fontSize:12,color:"var(--danger)",marginBottom:12}}>{err}</div>}
+
+        <button onClick={submit} disabled={testing||!val.trim()}
+          style={{width:"100%",background:"var(--accent)",color:"#fff",border:"none",borderRadius:8,padding:"11px 0",fontFamily:"Inter,sans-serif",fontSize:14,fontWeight:600,cursor:testing?"wait":"pointer",opacity:testing||!val.trim()?0.5:1,marginTop:8}}>
+          {testing ? "Verifying…" : "Save Key and Continue"}
+        </button>
+
+        <div style={{marginTop:24,padding:"16px",background:"var(--surface2)",borderRadius:8,fontSize:12,color:"var(--text-dim)",lineHeight:1.6}}>
+          <strong style={{color:"var(--text-muted)"}}>Getting a key:</strong> Go to{" "}
+          <a href="https://console.anthropic.com" target="_blank" rel="noreferrer"
+            style={{color:"var(--accent)"}}>console.anthropic.com</a>,
+          create an account, add a small credit balance (A$5–10 will last months for this tool),
+          and generate an API key under API Keys.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SHARED UI ────────────────────────────────────────────────────────────────
+function Loader({ label }) {
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:12,padding:"28px 0",color:"var(--text-muted)",fontSize:14}}>
+      <div style={{width:20,height:20,border:"2px solid var(--border)",borderTopColor:"var(--accent)",borderRadius:"50%",animation:"spin .8s linear infinite",flexShrink:0}}/>
+      <span>{label||"Researching…"}</span>
+    </div>
+  );
+}
+
+function ParsedResult({ text }) {
+  if (!text) return null;
+  const els = text.split("\n").filter(Boolean).map((line,i) => {
+    if (line.startsWith("### ")) return <h4 key={i} style={{fontSize:14,fontWeight:600,color:"var(--accent2)",margin:"14px 0 6px"}}>{line.slice(4)}</h4>;
+    if (line.startsWith("## "))  return <h3 key={i} style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:700,color:"var(--accent)",margin:"20px 0 8px",textTransform:"uppercase",letterSpacing:".05em"}}>{line.slice(3)}</h3>;
+    if (line.startsWith("# "))   return <h2 key={i} style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,margin:"20px 0 10px",letterSpacing:"-.01em"}}>{line.slice(2)}</h2>;
+    if (/^\*\*.*\*\*$/.test(line)) return <p key={i} style={{fontSize:14,fontWeight:600,color:"var(--text)",margin:"8px 0"}}>{line.slice(2,-2)}</p>;
+    if (line.startsWith("- ")||line.startsWith("• ")) return <li key={i} style={{fontSize:14,color:"var(--text)",margin:"5px 0 5px 16px",listStyle:"none",position:"relative"}}><span style={{position:"absolute",left:-16,color:"var(--text-dim)"}}>—</span>{line.slice(2)}</li>;
+    if (/^\d+\./.test(line)) return <li key={i} style={{fontSize:14,color:"var(--text)",margin:"5px 0 5px 16px",listStyle:"none",position:"relative"}}><span style={{position:"absolute",left:-16,color:"var(--accent3)"}}>›</span>{line.replace(/^\d+\.\s*/,"")}</li>;
+    if (line.startsWith("---")) return <hr key={i} style={{border:"none",borderTop:"1px solid var(--border)",margin:"18px 0"}}/>;
+    return <p key={i} style={{fontSize:14,color:"var(--text)",margin:"6px 0",lineHeight:1.7}}>{line}</p>;
+  });
+  return <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"24px 28px",marginTop:20}}>{els}</div>;
+}
+
+function CachedBanner({ timestamp, onClear }) {
+  if (!timestamp) return null;
+  const d = new Date(timestamp);
+  const fmt = d.toLocaleDateString("en-AU",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"});
+  return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"8px 14px",marginBottom:12,fontSize:12,color:"var(--text-dim)"}}>
+      <span>📋 Showing saved result from {fmt}</span>
+      <button onClick={onClear} style={{background:"none",border:"none",color:"var(--accent)",fontSize:12,cursor:"pointer",fontFamily:"Inter,sans-serif"}}>Clear →</button>
+    </div>
+  );
+}
+
+// ─── QUICK PERIOD HELPERS ─────────────────────────────────────────────────────
+const QUICK_PERIODS = [
+  {label:"1 Week",days:7},{label:"1 Month",days:30},{label:"1 Quarter",days:90},
+  {label:"6 Months",days:180},{label:"1 Year",days:365},
+];
+const EXAMPLE_TICKERS    = ["NVDA","AAPL","TSLA","MSFT","ASML"];
+const EXAMPLE_INDUSTRIES = ["Semiconductors","Electric Vehicles","Pharmaceuticals","Cloud Computing","Lithium Mining"];
+
+function toYMD(d){ return d.toISOString().slice(0,10); }
+
+// ─── CHIP ROW ─────────────────────────────────────────────────────────────────
+function Chips({ items, label, onClick, style }) {
+  return (
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:12,...style}}>
+      {label && <span style={{fontSize:12,color:"var(--text-dim)",whiteSpace:"nowrap"}}>{label}</span>}
+      {items.map((item,i)=>(
+        <button key={i} onClick={()=>onClick(item.value||item)}
+          style={{background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:20,color:"var(--text-muted)",fontSize:12,fontWeight:500,padding:"4px 12px",cursor:"pointer",fontFamily:"Inter,sans-serif"}}>
+          {item.label||item}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── FLOW DIAGRAM ─────────────────────────────────────────────────────────────
+const NODE_W=190, NODE_H=140, COL_GAP=90, ROW_GAP=28;
+const PALETTE=["#4f8ef7","#7c6af7","#c46af7","#f76aae","#f7876a","#f7b76a","#34d399","#22d3ee","#a78bfa"];
+
+function computeLayout(stages, edges) {
+  const n=stages.length;
+  const out=Array.from({length:n},()=>[]);
+  const inc=Array.from({length:n},()=>[]);
+  edges.forEach(e=>{out[e.from].push(e.to);inc[e.to].push(e.from);});
+  const col=Array(n).fill(0);
+  const deg=inc.map(a=>a.length);
+  const q=[]; deg.forEach((d,i)=>{if(d===0)q.push(i);});
+  const ord=[];
+  while(q.length){const u=q.shift();ord.push(u);out[u].forEach(v=>{deg[v]--;if(deg[v]===0)q.push(v);});}
+  ord.forEach(u=>{out[u].forEach(v=>{col[v]=Math.max(col[v],col[u]+1);});});
+  const cols={};
+  stages.forEach((_,i)=>{const c=col[i];if(!cols[c])cols[c]=[];cols[c].push(i);});
+  const cks=Object.keys(cols).map(Number).sort((a,b)=>a-b);
+  const cx={};cks.forEach((c,ci)=>{cx[c]=ci*(NODE_W+COL_GAP);});
+  const mh=Math.max(...cks.map(c=>cols[c].length*(NODE_H+ROW_GAP)-ROW_GAP));
+  const pos={};
+  cks.forEach(c=>{
+    const its=cols[c],ch=its.length*(NODE_H+ROW_GAP)-ROW_GAP,sy=(mh-ch)/2;
+    its.forEach((ni,r)=>{pos[ni]={x:cx[c],y:sy+r*(NODE_H+ROW_GAP)};});
+  });
+  return {pos,svgW:cks.length*(NODE_W+COL_GAP)-COL_GAP,svgH:mh,out,inc};
+}
+
+function FlowDiagram({ stages, edges }) {
+  const [active, setActive] = useState(null);
+  if (!stages||stages.length===0) return null;
+
+  const vEdges=(edges||[]).filter(e=>
+    typeof e.from==="number"&&typeof e.to==="number"&&e.from>=0&&e.to<stages.length&&e.from!==e.to
+  );
+  const {pos,svgW,svgH,out,inc}=computeLayout(stages,vEdges);
+
+  const activeNodes=new Set(), activeEdges=new Set();
+  if(active!==null){
+    activeNodes.add(active);
+    out[active].forEach(v=>activeNodes.add(v));
+    inc[active].forEach(v=>activeNodes.add(v));
+    vEdges.forEach((e,i)=>{if(e.from===active||e.to===active)activeEdges.add(i);});
+  }
+  const has=active!==null;
+
+  function path(f,t){
+    const fx=pos[f].x+NODE_W,fy=pos[f].y+NODE_H/2;
+    const tx=pos[t].x,ty=pos[t].y+NODE_H/2;
+    const cx=(fx+tx)/2;
+    return "M "+fx+","+fy+" C "+cx+","+fy+" "+cx+","+ty+" "+tx+","+ty;
+  }
+
+  return (
+    <div style={{marginTop:24,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:24}}>
+      <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:13,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"var(--text-muted)",marginBottom:6}}>
+        Value Chain Flow Diagram
+      </div>
+      <p style={{fontSize:12,color:"var(--text-dim)",marginBottom:18,lineHeight:1.5}}>
+        Click any stage to highlight its connections. Dashed arrows = secondary paths. ⭐ = good starting point for a new investor.
+        Stages in the same column are parallel alternatives, not sequential steps.
+      </p>
+      <div style={{overflowX:"auto",paddingBottom:12}}>
+        <svg width={svgW+40} height={svgH+40} viewBox={"0 0 "+(svgW+40)+" "+(svgH+40)} style={{display:"block"}}>
+          <defs>
+            <marker id="a-n" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#4a5568"/></marker>
+            <marker id="a-a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#f59e0b"/></marker>
+            <marker id="a-d" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#1e2433"/></marker>
+            <style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style>
+          </defs>
+          <g transform="translate(20,20)">
+            {vEdges.map((e,i)=>{
+              const isA=activeEdges.has(i),isD=has&&!isA;
+              return <path key={i} d={path(e.from,e.to)} fill="none"
+                stroke={isA?"#f59e0b":isD?"#1e2433":"#4a5568"}
+                strokeWidth={isA?2.5:1.5} strokeDasharray={e.secondary?"5,4":"none"}
+                markerEnd={isA?"url(#a-a)":isD?"url(#a-d)":"url(#a-n)"}
+                opacity={isD?0.1:1} style={{transition:"all .2s"}}/>;
+            })}
+            {stages.map((s,i)=>{
+              const {x,y}=pos[i];
+              const col=PALETTE[i%PALETTE.length];
+              const isA=active===i,isD=has&&!activeNodes.has(i),isL=has&&!isA&&activeNodes.has(i);
+              const bc=isA||isL?"#f59e0b":col;
+              const companies=(s.companies||[]).slice(0,4);
+              const isBeginner=!!s.beginner;
+              return (
+                <g key={i} style={{cursor:"pointer"}} onClick={()=>setActive(active===i?null:i)}>
+                  {isA&&<rect x={x-4} y={y-4} width={NODE_W+8} height={NODE_H+8} rx="11" fill="none" stroke="#f59e0b" strokeWidth="1.5" opacity=".4"/>}
+                  <rect x={x} y={y} width={NODE_W} height={NODE_H} rx="8"
+                    fill={isA?"#2a2010":"var(--surface2)"}
+                    stroke={bc} strokeWidth={isA||isL?2.5:1.5}
+                    opacity={isD?.15:1} style={{transition:"all .2s"}}/>
+
+                  {/* Beginner star badge */}
+                  {isBeginner&&(
+                    <g opacity={isD?.15:1}>
+                      <rect x={x+NODE_W-38} y={y+4} width={34} height={16} rx="8" fill="#f59e0b" opacity=".15"/>
+                      <text x={x+NODE_W-21} y={y+15} textAnchor="middle" fontSize="10" fill="#f59e0b" fontFamily="Inter,sans-serif" fontWeight="600">⭐ Start</text>
+                    </g>
+                  )}
+
+                  {/* Number badge */}
+                  <circle cx={x+16} cy={y+16} r="11" fill={isA?"#f59e0b":col} opacity={isD?.15:1}/>
+                  <text x={x+16} y={y+20} textAnchor="middle" fill="#fff" fontSize="10" fontFamily="Space Grotesk,sans-serif" fontWeight="700" opacity={isD?.15:1}>{i+1}</text>
+
+                  {/* Stage name */}
+                  <foreignObject x={x+6} y={y+30} width={NODE_W-12} height={28}>
+                    <div xmlns="http://www.w3.org/1999/xhtml" style={{fontSize:11,fontFamily:"Space Grotesk,sans-serif",fontWeight:700,color:isA?"#f59e0b":"#e8eaf0",lineHeight:1.3,overflow:"hidden",maxHeight:28,opacity:isD?.15:1}}>
+                      {s.name}
+                    </div>
+                  </foreignObject>
+
+                  {/* What it does — short */}
+                  <foreignObject x={x+6} y={y+58} width={NODE_W-12} height={28}>
+                    <div xmlns="http://www.w3.org/1999/xhtml" style={{fontSize:9,fontFamily:"Inter,sans-serif",color:"#8892a4",lineHeight:1.4,overflow:"hidden",maxHeight:28,opacity:isD?.15:1}}>
+                      {(s.what||"").slice(0,70)}
+                    </div>
+                  </foreignObject>
+
+                  {/* Tickers */}
+                  <foreignObject x={x+6} y={y+86} width={NODE_W-12} height={28}>
+                    <div xmlns="http://www.w3.org/1999/xhtml" style={{display:"flex",flexWrap:"wrap",gap:3,opacity:isD?.15:1}}>
+                      {companies.map((c,ci)=>(
+                        <span key={ci} style={{fontSize:9,fontFamily:"Space Grotesk,sans-serif",fontWeight:700,padding:"1px 5px",borderRadius:3,border:"1px solid "+(isA?"#f59e0b":col),color:"#e8eaf0",background:"rgba(79,142,247,.1)",letterSpacing:".02em"}}>{c}</span>
+                      ))}
+                    </div>
+                  </foreignObject>
+
+                  {/* Margin */}
+                  {s.margin&&(
+                    <foreignObject x={x+6} y={y+NODE_H-20} width={NODE_W-12} height={16}>
+                      <div xmlns="http://www.w3.org/1999/xhtml" style={{fontSize:9,fontFamily:"Inter,sans-serif",color:isD?"#2a3147":"#8892a4",opacity:isD?.15:1}}>
+                        <span style={{fontWeight:600,color:isD?"#2a3147":(isA?"#f59e0b":col)}}>Margin: </span>{s.margin}
+                      </div>
+                    </foreignObject>
+                  )}
+                </g>
+              );
+            })}
+          </g>
+        </svg>
+      </div>
+      {active!==null&&(
+        <div style={{display:"flex",flexWrap:"wrap",gap:16,marginTop:16,padding:"10px 14px",background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",fontSize:12}}>
+          <span style={{color:"#f59e0b",fontWeight:600,fontFamily:"Space Grotesk,sans-serif"}}>● {stages[active].name}</span>
+          {out[active].length>0&&<span style={{color:"var(--text-muted)"}}>→ Feeds into: {out[active].map(v=>stages[v].name).join(", ")}</span>}
+          {inc[active].length>0&&<span style={{color:"var(--text-muted)"}}>← Receives from: {inc[active].map(v=>stages[v].name).join(", ")}</span>}
+          {stages[active].beginner&&<span style={{color:"#f59e0b"}}>⭐ Good starting point for new investors</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── PANEL: Why Did It Move ───────────────────────────────────────────────────
+function MoverPanel({ apiKey }) {
+  const saved     = LS.get(STORAGE_KEYS.movers);
+  const [ticker,setTicker]     = useState(saved?.ticker||"");
+  const [dateFrom,setDateFrom] = useState(saved?.dateFrom||"");
+  const [dateTo,setDateTo]     = useState(saved?.dateTo||"");
+  const [result,setResult]     = useState(saved?.result||null);
+  const [ts,setTs]             = useState(saved?.ts||null);
+  const [loading,setLoading]   = useState(false);
+  const [error,setError]       = useState(null);
+
+  const applyQuick=days=>{const to=new Date(),from=new Date();from.setDate(from.getDate()-days);setDateTo(toYMD(to));setDateFrom(toYMD(from));};
+  const clearCache=()=>{setResult(null);setTs(null);LS.del(STORAGE_KEYS.movers);};
+
+  const analyse=useCallback(async()=>{
+    if(!ticker.trim())return;
+    setLoading(true);setError(null);setResult(null);setTs(null);
+    try{
+      const pd=dateFrom&&dateTo?"from "+dateFrom+" to "+dateTo:dateFrom?"from "+dateFrom+" to today":dateTo?"up to "+dateTo:"over the past month";
+      const sys="You are a patient investment educator helping a young adult (18+) learn to invest.\nExplain clearly; use real numbers. Structure with these exact headings:\n## Price Performance Summary\n## Timeline of Key Events\n## The Dominant Themes\n## What This Tells Us About the Business\n## What an Investor Should Think About Now\n## One Thing to Watch Next\nExplain any jargon.";
+      const usr="Analyse the stock price movement for "+ticker.toUpperCase()+" "+pd+". Search for significant news, earnings, analyst changes, macro events. Give a clear chronological explanation an 18-year-old learning to invest would find useful.";
+      const text=await callClaude(apiKey,sys,usr,1400,true);
+      const now=Date.now();
+      setResult(text);setTs(now);
+      LS.set(STORAGE_KEYS.movers,{ticker,dateFrom,dateTo,result:text,ts:now});
+    }catch(e){setError(e.message);}finally{setLoading(false);}
+  },[ticker,dateFrom,dateTo,apiKey]);
+
+  return (
+    <div style={{padding:"28px 0"}}>
+      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Why Did It Move?</h2>
+      <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:24}}>Enter a ticker and date range to understand what drove the price — a single day, a quarter, or a full year.</p>
+      <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
+        <input placeholder="e.g. NVDA" value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&analyse()} maxLength={10}
+          style={{width:120,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
+        <span style={{fontSize:12,color:"var(--text-muted)"}}>From</span>
+        <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}
+          style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none"}}/>
+        <span style={{fontSize:12,color:"var(--text-muted)"}}>To</span>
+        <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)}
+          style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none"}}/>
+        <button onClick={analyse} disabled={loading||!ticker.trim()}
+          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!ticker.trim()?"not-allowed":"pointer",opacity:loading||!ticker.trim()?.5:1}}>
+          {loading?"…":"Analyse"}
+        </button>
+      </div>
+      <Chips items={QUICK_PERIODS.map(p=>({label:p.label,value:p}))} label="Quick:" onClick={p=>applyQuick(p.days)} style={{marginBottom:8}}/>
+      <Chips items={EXAMPLE_TICKERS} label="Examples:" onClick={t=>setTicker(t)} style={{marginBottom:24}}/>
+      {loading&&<Loader label="Researching price history and events…"/>}
+      {error&&<div style={{background:"#1e1010",border:"1px solid #4a1e1e",borderRadius:"var(--radius-sm)",color:"var(--danger)",padding:"14px 16px",fontSize:13,marginTop:12}}>⚠️ {error}</div>}
+      {result&&<><CachedBanner timestamp={ts} onClear={clearCache}/><ParsedResult text={result}/></>}
+    </div>
+  );
+}
+
+// ─── PANEL: Company Research ──────────────────────────────────────────────────
+function ResearchPanel({ apiKey }) {
+  const saved=LS.get(STORAGE_KEYS.research);
+  const [ticker,setTicker]=useState(saved?.ticker||"");
+  const [result,setResult]=useState(saved?.result||null);
+  const [ts,setTs]=useState(saved?.ts||null);
+  const [loading,setLoading]=useState(false);
+  const [error,setError]=useState(null);
+  const clearCache=()=>{setResult(null);setTs(null);LS.del(STORAGE_KEYS.research);};
+
+  const research=useCallback(async()=>{
+    if(!ticker.trim())return;
+    setLoading(true);setError(null);setResult(null);setTs(null);
+    try{
+      const sys="You are a patient investment educator helping an 18-year-old learn to invest.\nBe thorough but clear. Use real current figures. Structure with:\n## What Does This Company Actually Do\n## How It Makes Money (Business Model)\n## Recent Financial Health (Revenue, Profit, Growth)\n## Competitive Position — Who Are the Rivals?\n## Key Risks\n## What the Market Currently Thinks (valuation, analyst sentiment)\n## Verdict — Is This an Interesting Investment to Learn From?\nBe specific with numbers.";
+      const usr="Research "+ticker.toUpperCase()+" as an investment. Find latest earnings, revenue growth, competitive position, valuation multiples, analyst views. Write a complete profile for a young investor.";
+      const text=await callClaude(apiKey,sys,usr,1400,true);
+      const now=Date.now();setResult(text);setTs(now);
+      LS.set(STORAGE_KEYS.research,{ticker,result:text,ts:now});
+    }catch(e){setError(e.message);}finally{setLoading(false);}
+  },[ticker,apiKey]);
+
+  return (
+    <div style={{padding:"28px 0"}}>
+      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Company Research</h2>
+      <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:24}}>Build a full picture of any company — what it does, how it makes money, its financials, rivals, and risks.</p>
+      <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
+        <input placeholder="e.g. AAPL" value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&research()} maxLength={10}
+          style={{width:130,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
+        <button onClick={research} disabled={loading||!ticker.trim()}
+          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!ticker.trim()?"not-allowed":"pointer",opacity:loading||!ticker.trim()?.5:1}}>
+          {loading?"…":"Research"}
+        </button>
+      </div>
+      <Chips items={EXAMPLE_TICKERS} onClick={t=>setTicker(t)} style={{marginBottom:24}}/>
+      {loading&&<Loader label="Researching company fundamentals…"/>}
+      {error&&<div style={{background:"#1e1010",border:"1px solid #4a1e1e",borderRadius:"var(--radius-sm)",color:"var(--danger)",padding:"14px 16px",fontSize:13}}>⚠️ {error}</div>}
+      {result&&<><CachedBanner timestamp={ts} onClear={clearCache}/><ParsedResult text={result}/></>}
+    </div>
+  );
+}
+
+// ─── PANEL: Compare Stocks ────────────────────────────────────────────────────
+function ComparePanel({ apiKey }) {
+  const saved=LS.get(STORAGE_KEYS.compare);
+  const [tickerA,setTickerA]=useState(saved?.tickerA||"");
+  const [tickerB,setTickerB]=useState(saved?.tickerB||"");
+  const [result,setResult]=useState(saved?.result||null);
+  const [ts,setTs]=useState(saved?.ts||null);
+  const [loading,setLoading]=useState(false);
+  const [error,setError]=useState(null);
+  const clearCache=()=>{setResult(null);setTs(null);LS.del(STORAGE_KEYS.compare);};
+
+  const compare=useCallback(async()=>{
+    if(!tickerA.trim()||!tickerB.trim())return;
+    setLoading(true);setError(null);setResult(null);setTs(null);
+    try{
+      const sys="You are a patient investment educator helping an 18-year-old compare stocks.\nStructure with:\n## Side-by-Side Snapshot (key metrics)\n## Business Model Comparison\n## Growth and Financials\n## Valuation — Which Looks Cheaper and Why\n## Risk Profile\n## Who Has the Stronger Competitive Moat?\n## Which Might Be More Interesting to a Young Investor, and Why?\nBe specific with numbers. Explain financial terms.";
+      const usr="Compare "+tickerA.toUpperCase()+" vs "+tickerB.toUpperCase()+" as investments. Search for latest data — revenue growth, profit margins, P/E or P/S ratios, competitive position, recent news.";
+      const text=await callClaude(apiKey,sys,usr,1400,true);
+      const now=Date.now();setResult(text);setTs(now);
+      LS.set(STORAGE_KEYS.compare,{tickerA,tickerB,result:text,ts:now});
+    }catch(e){setError(e.message);}finally{setLoading(false);}
+  },[tickerA,tickerB,apiKey]);
+
+  const PAIRS=[["NVDA","AMD"],["AAPL","MSFT"],["TSLA","RIVN"]];
+  return (
+    <div style={{padding:"28px 0"}}>
+      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Compare Stocks</h2>
+      <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:24}}>Put two companies head-to-head on financials, valuation, competitive position, and risk.</p>
+      <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
+        <input placeholder="Ticker A" value={tickerA} onChange={e=>setTickerA(e.target.value.toUpperCase())} maxLength={10}
+          style={{width:120,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
+        <span style={{fontFamily:"Space Grotesk,sans-serif",fontSize:12,fontWeight:700,color:"var(--text-dim)",letterSpacing:".1em"}}>VS</span>
+        <input placeholder="Ticker B" value={tickerB} onChange={e=>setTickerB(e.target.value.toUpperCase())} maxLength={10}
+          style={{width:120,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
+        <button onClick={compare} disabled={loading||!tickerA.trim()||!tickerB.trim()}
+          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!tickerA.trim()||!tickerB.trim()?"not-allowed":"pointer",opacity:loading||!tickerA.trim()||!tickerB.trim()?.5:1}}>
+          {loading?"…":"Compare"}
+        </button>
+      </div>
+      <Chips items={PAIRS.map(([a,b])=>({label:a+" vs "+b,value:{a,b}}))} onClick={p=>{setTickerA(p.a);setTickerB(p.b);}} style={{marginBottom:24}}/>
+      {loading&&<Loader label="Comparing both companies…"/>}
+      {error&&<div style={{background:"#1e1010",border:"1px solid #4a1e1e",borderRadius:"var(--radius-sm)",color:"var(--danger)",padding:"14px 16px",fontSize:13}}>⚠️ {error}</div>}
+      {result&&<><CachedBanner timestamp={ts} onClear={clearCache}/><ParsedResult text={result}/></>}
+    </div>
+  );
+}
+
+// ─── PANEL: Industry Chain ────────────────────────────────────────────────────
+function ChainPanel({ apiKey }) {
+  const saved=LS.get(STORAGE_KEYS.chain);
+  const [industry,setIndustry]         = useState(saved?.industry||"");
+  const [chainData,setChainData]       = useState(saved?.chainData||null);
+  const [result,setResult]             = useState(saved?.result||null);
+  const [ts,setTs]                     = useState(saved?.ts||null);
+  const [loading,setLoading]           = useState(false);
+  const [loadingStep,setLoadingStep]   = useState("");
+  const [error,setError]               = useState(null);
+  const [focusTicker,setFocusTicker]   = useState("");
+  const [focusResult,setFocusResult]   = useState(null);
+  const [focusLoading,setFocusLoading] = useState(false);
+  const clearCache=()=>{setResult(null);setChainData(null);setTs(null);LS.del(STORAGE_KEYS.chain);};
+
+  const exploreChain=useCallback(async()=>{
+    if(!industry.trim())return;
+    setLoading(true);setError(null);setResult(null);setChainData(null);setFocusResult(null);setTs(null);
+    try{
+      // Call 1: JSON structure with stages + edges + beginner flags
+      setLoadingStep("Mapping chain structure…");
+      const structSys=[
+        "You are a financial analyst. Return ONLY a valid JSON object — no markdown, no explanation.",
+        "The object must have two keys:",
+        "\"stages\": array of objects. Each: { id (integer 0-based), name (string), what (string, one sentence max 15 words), companies (array of 3-5 real listed ticker strings), margin (string e.g. Low 5-8%), beginner (boolean — true for the 1-2 stages that are the most transparent, liquid, and easiest to understand for a first-time investor) }.",
+        "\"edges\": array of directed flow objects. Each: { from (integer stage id), to (integer stage id), secondary (boolean, true if less common path) }.",
+        "Edges must capture REAL branching flow — a stage can have multiple outgoing and incoming edges.",
+        "Do NOT just chain stages 0->1->2->3 linearly unless that is genuinely how the industry works.",
+        "Mark beginner:true on only 1-2 stages maximum — the ones where stocks are most accessible and easiest to analyse for a beginner.",
+        "Include ALL stages from raw materials to end consumer. Typically 8-12 stages.",
+        "Return ONLY the JSON object.",
+      ].join("\n");
+      const structUsr="Return the complete value chain stages and flow edges for the "+industry+" industry. Real tickers only. Capture real branching, not a linear chain. Mark the 1-2 most beginner-friendly stages.";
+      const jsonRaw=await callClaude(apiKey,structSys,structUsr,2000,false);
+      let parsedData=null;
+      try{
+        const cleaned=jsonRaw.replace(/^```[\w]*\n?/gm,"").replace(/```/g,"").trim();
+        const obj=JSON.parse(cleaned);
+        if(obj.stages&&obj.edges)parsedData=obj;
+      }catch(_){}
+      setChainData(parsedData);
+
+      // Call 2: Full written analysis — single call with canonical list
+      const stageList=parsedData ? parsedData.stages.map(s=>"Stage "+(s.id+1)+": "+s.name).join(" | ") : "";
+      setLoadingStep("Researching all stages and writing analysis…");
+      const writtenSys=[
+        "You are an investment educator writing for an 18-year-old learning to invest.",
+        "The canonical stage list for the "+industry+" industry is:",
+        stageList,
+        "",
+        "Write a detailed breakdown covering EVERY stage — in order, no gaps, no renaming.",
+        "For each stage use EXACTLY this format:",
+        "",
+        "**Stage N: [Name from canonical list]**",
+        "What happens: [Two clear sentences.]",
+        "Key companies: [TICKER — Company Name | TICKER — Company Name | TICKER — Company Name]",
+        "Investor angle: [One to two sentences on why this stage is or is not an interesting investment.]",
+        "---",
+        "",
+        "After ALL stages, write these four sections:",
+        "",
+        "## Where the Pricing Power Sits",
+        "[Which stage(s) control margins and exactly why — patents, scarcity, switching costs. Quote margin ranges.]",
+        "",
+        "## Hidden Gems — Less-Obvious Investment Angles",
+        "[2-3 companies in overlooked stages. For each: TICKER, stage, why interesting, one risk.]",
+        "",
+        "## Best Stages to Invest In Right Now — and Why",
+        "[Rank the top 2-3 stages as investment opportunities for a long-term young investor. For each: stage name, why attractive now, one named stock to research, one reason to be cautious. Be specific and opinionated.]",
+        "",
+        "## How to Think About This as an Investor",
+        "[Practical framework: what questions to ask, what signals to look for when choosing which part of the chain to back.]",
+        "",
+        "CRITICAL: Use only stage names and numbers from the canonical list. Do not skip any stage. Do not stop early.",
+      ].join("\n");
+      const writtenUsr="Write the complete stage-by-stage breakdown for ALL "+industry+" industry stages listed above, then the four analysis sections. Search for real current company data. Cover every stage. Do not stop early.";
+      const text=await callClaude(apiKey,writtenSys,writtenUsr,4000,true);
+      const now=Date.now();
+      setResult(text);setTs(now);
+      LS.set(STORAGE_KEYS.chain,{industry,chainData:parsedData,result:text,ts:now});
+    }catch(e){setError(e.message);}
+    finally{setLoading(false);setLoadingStep("");}
+  },[industry,apiKey]);
+
+  const drillDown=useCallback(async()=>{
+    if(!focusTicker.trim())return;
+    setFocusLoading(true);setFocusResult(null);
+    try{
+      const sys="You are helping a young investor drill into a specific company in an industry chain.\nBe specific and educational. Use these headings:\n## Where "+focusTicker.toUpperCase()+" Sits in the Chain\n## What Makes This Position Interesting (or not)\n## Key Financials and Recent Performance\n## How Exposed Is It to the Rest of the Chain?\n## Should This Be on a Watch List?";
+      const usr="Drill into "+focusTicker.toUpperCase()+" as part of the "+industry+" value chain. Search for current information — its specific role, recent financials, news, competitive position. Write for a young investor.";
+      setFocusResult(await callClaude(apiKey,sys,usr,1400,true));
+    }catch(e){setFocusResult("Error: "+e.message);}
+    finally{setFocusLoading(false);}
+  },[focusTicker,industry,apiKey]);
+
+  return (
+    <div style={{padding:"28px 0"}}>
+      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Industry Chain Explorer</h2>
+      <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:24}}>Map the full value chain — raw materials to end product — and find where the real investment opportunities sit.</p>
+      <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
+        <input placeholder="e.g. Semiconductors, Electric Vehicles, Pharmaceuticals"
+          value={industry} onChange={e=>setIndustry(e.target.value)} onKeyDown={e=>e.key==="Enter"&&exploreChain()}
+          style={{flex:1,minWidth:240,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none"}}/>
+        <button onClick={exploreChain} disabled={loading||!industry.trim()}
+          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!industry.trim()?"not-allowed":"pointer",opacity:loading||!industry.trim()?.5:1}}>
+          {loading?"…":"Explore Chain"}
+        </button>
+      </div>
+      <Chips items={EXAMPLE_INDUSTRIES} onClick={v=>setIndustry(v)} style={{marginBottom:24}}/>
+      {loading&&<Loader label={loadingStep||"Mapping value chain…"}/>}
+      {error&&<div style={{background:"#1e1010",border:"1px solid #4a1e1e",borderRadius:"var(--radius-sm)",color:"var(--danger)",padding:"14px 16px",fontSize:13}}>⚠️ {error}</div>}
+      {chainData&&<FlowDiagram stages={chainData.stages} edges={chainData.edges}/>}
+      {result&&(
+        <>
+          <CachedBanner timestamp={ts} onClear={clearCache}/>
+          <ParsedResult text={result}/>
+          <div style={{marginTop:32,background:"var(--surface2)",border:"1px solid var(--border)",borderLeft:"3px solid var(--accent3)",borderRadius:"var(--radius)",padding:"24px 28px"}}>
+            <h3 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:700,marginBottom:6}}>🔎 Drill into a Company from This Chain</h3>
+            <p style={{fontSize:13,color:"var(--text-muted)",marginBottom:16}}>Spotted a company above? Enter its ticker for a focused deep-dive.</p>
+            <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+              <input placeholder="e.g. ASML" value={focusTicker} onChange={e=>setFocusTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&drillDown()} maxLength={10}
+                style={{width:120,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
+              <button onClick={drillDown} disabled={focusLoading||!focusTicker.trim()}
+                style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--surface2)",border:"1px solid var(--border)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:focusLoading||!focusTicker.trim()?"not-allowed":"pointer",opacity:focusLoading||!focusTicker.trim()?.5:1}}>
+                {focusLoading?"…":"Drill Down"}
+              </button>
+            </div>
+            {focusLoading&&<Loader label="Researching this company's role in the chain…"/>}
+            {focusResult&&<ParsedResult text={focusResult}/>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── APP ──────────────────────────────────────────────────────────────────────
+const NAV=[
+  {id:"movers",  label:"Why Did It Move?", icon:"📈"},
+  {id:"research",label:"Company Research",  icon:"🔍"},
+  {id:"compare", label:"Compare Stocks",    icon:"⚖️"},
+  {id:"chain",   label:"Industry Chain",    icon:"🔗"},
+];
+
+function App() {
+  const [apiKey,setApiKey]   = useState(()=>LS.get(STORAGE_KEYS.apiKey));
+  const [tab,setTab]         = useState("movers");
+
+  const handleKey = k => setApiKey(k);
+  const resetKey  = () => { LS.del(STORAGE_KEYS.apiKey); setApiKey(null); };
+
+  if (!apiKey) return <ApiKeyGate onKey={handleKey}/>;
+
+  return (
+    <div style={{maxWidth:960,margin:"0 auto",padding:"0 16px 60px"}}>
+      <style>{`
+        @keyframes spin{to{transform:rotate(360deg)}}
+        button:hover{filter:brightness(1.1)}
+      `}</style>
+
+      {/* Header */}
+      <div style={{padding:"32px 0 24px",borderBottom:"1px solid var(--border)"}}>
+        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:11,fontWeight:500,letterSpacing:".15em",textTransform:"uppercase",color:"var(--accent)",marginBottom:8}}>Investment Learning Tool</div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+          <h1 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:28,fontWeight:700,letterSpacing:"-.02em"}}>
+            Stock <span style={{color:"var(--accent2)"}}>Explorer</span>
+          </h1>
+          <button onClick={resetKey}
+            style={{background:"none",border:"1px solid var(--border)",borderRadius:6,color:"var(--text-dim)",fontSize:11,padding:"4px 10px",cursor:"pointer",fontFamily:"Inter,sans-serif"}}>
+            Change API Key
+          </button>
+        </div>
+        <p style={{fontSize:14,color:"var(--text-muted)",marginTop:6}}>Research stocks, understand price moves, compare companies, and map industry value chains.</p>
+      </div>
+
+      {/* Nav */}
+      <nav style={{display:"flex",gap:4,padding:"16px 0",borderBottom:"1px solid var(--border)",overflowX:"auto"}}>
+        {NAV.map(item=>(
+          <button key={item.id} onClick={()=>setTab(item.id)}
+            style={{display:"flex",alignItems:"center",gap:6,padding:"8px 16px",borderRadius:8,border:"1px solid "+(tab===item.id?"var(--accent)":"transparent"),background:tab===item.id?"var(--surface2)":"none",color:tab===item.id?"var(--accent)":"var(--text-muted)",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:500,cursor:"pointer",whiteSpace:"nowrap",transition:"all .15s"}}>
+            <span>{item.icon}</span>{item.label}
+          </button>
+        ))}
+      </nav>
+
+      {/* Panels */}
+      {tab==="movers"   && <MoverPanel   apiKey={apiKey}/>}
+      {tab==="research" && <ResearchPanel apiKey={apiKey}/>}
+      {tab==="compare"  && <ComparePanel  apiKey={apiKey}/>}
+      {tab==="chain"    && <ChainPanel    apiKey={apiKey}/>}
+
+      {/* Disclaimer */}
+      <div style={{marginTop:40,padding:"14px 18px",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",fontSize:12,color:"var(--text-dim)",lineHeight:1.5}}>
+        ⚠️ For <strong style={{color:"var(--text-muted)"}}>educational purposes only</strong> — not financial advice.
+        Always do your own research and consult a licensed financial adviser before making investment decisions.
+        AI-generated analysis may contain errors — verify important figures independently.
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
