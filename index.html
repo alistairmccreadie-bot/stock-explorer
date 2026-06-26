@@ -39,7 +39,7 @@ const LS = {
 };
 
 const STORAGE_KEYS = {
-  apiKey:    "sx_api_key",
+  access:    "sx_access_code",
   movers:    "sx_last_movers",
   research:  "sx_last_research",
   compare:   "sx_last_compare",
@@ -47,7 +47,10 @@ const STORAGE_KEYS = {
   watchlist: "sx_watchlist",
 };
 
-// ─── ANTHROPIC API ────────────────────────────────────────────────────────────
+// ─── ANTHROPIC API (via Cloudflare Worker proxy) ──────────────────────────────
+// Requests go to our own Worker, which holds the Anthropic key server-side and
+// checks a shared access password. The key is never present in the browser.
+const PROXY_URL = "https://stock-explorer-proxy.alistair-mccreadie.workers.dev";
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
 // max_tokens is a CEILING, not a target — the model only emits what it needs, so
@@ -87,7 +90,7 @@ function buildSys(role, sections) {
 
 function friendlyError(status, err) {
   const msg = (err && err.message) || "Unknown error";
-  if (status===401) return "Your API key was rejected (401). Check it is correct and that the account has credit.";
+  if (status===401) return (err && err.message) || "Access denied (401). Check the access password is correct.";
   if (status===429) return "Rate limit hit (429). Wait a moment and try again — or add more credit if your balance is low.";
   if (status===529) return "Anthropic's servers are overloaded right now (529). Please try again in a few seconds.";
   if (status>=500) return "Anthropic had a server error ("+status+"). Please try again shortly.";
@@ -143,8 +146,9 @@ async function readStream(res, onDelta) {
   return { text, sources };
 }
 
-// Returns { text, sources }. Pass onDelta to stream tokens as they arrive.
-async function callClaude(apiKey, sys, usr, maxTokens, useSearch, onDelta) {
+// Returns { text, sources }. `access` is the shared password sent to our proxy.
+// Pass onDelta to stream tokens as they arrive.
+async function callClaude(access, sys, usr, maxTokens, useSearch, onDelta) {
   const stream = typeof onDelta === "function";
   const body = {
     model: "claude-sonnet-4-6",
@@ -159,15 +163,15 @@ async function callClaude(apiKey, sys, usr, maxTokens, useSearch, onDelta) {
   for (let attempt=0; attempt<3; attempt++) {
     let res;
     try {
-      res = await fetch("https://api.anthropic.com/v1/messages", {
+      res = await fetch(PROXY_URL, {
         method: "POST",
-        headers: { "Content-Type":"application/json", "x-api-key":apiKey, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
+        headers: { "Content-Type":"application/json", "x-access-code":access },
         body: JSON.stringify(body),
       });
     } catch(netErr) {
       // Network/CORS failure — retry a couple of times before giving up.
       if (attempt<2) { await sleep(800*(attempt+1)); continue; }
-      throw new Error("Network error reaching Anthropic. Check your connection and try again.");
+      throw new Error("Network error reaching the server. Check your connection and try again.");
     }
     lastStatus = res.status;
     if (!res.ok) {
@@ -195,14 +199,14 @@ function ApiKeyGate({ onKey }) {
   const [testing, setT]   = useState(false);
 
   const submit = async () => {
-    const k = val.trim();
-    if (!k.startsWith("sk-ant-")) { setErr("Key should start with sk-ant-"); return; }
+    const code = val.trim();
+    if (!code) { setErr("Please enter the access password."); return; }
     setT(true); setErr(null);
     try {
-      await callClaude(k, "You are a test.", "Reply with the single word: ready", 10, false);
-      LS.set(STORAGE_KEYS.apiKey, k);
-      onKey(k);
-    } catch(e) { setErr("Could not verify key: " + e.message); }
+      await callClaude(code, "You are a test.", "Reply with the single word: ready", 10, false);
+      LS.set(STORAGE_KEYS.access, code);
+      onKey(code);
+    } catch(e) { setErr(e.message); }
     finally { setT(false); }
   };
 
@@ -216,17 +220,18 @@ function ApiKeyGate({ onKey }) {
           Stock <span style={{color:"var(--accent2)"}}>Explorer</span>
         </h1>
         <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.6,marginBottom:32}}>
-          Enter your Anthropic API key to get started. Your key is saved in this browser only — it never leaves your device.
+          Enter the access password to get started. It's saved in this browser so you only need to do this once.
         </p>
 
         <div style={{marginBottom:8}}>
-          <label style={{fontSize:12,color:"var(--text-muted)",display:"block",marginBottom:6}}>Anthropic API Key</label>
+          <label style={{fontSize:12,color:"var(--text-muted)",display:"block",marginBottom:6}}>Access Password</label>
           <input
             type="password"
-            placeholder="sk-ant-api03-..."
+            placeholder="Enter password"
             value={val}
             onChange={e=>setVal(e.target.value)}
             onKeyDown={e=>e.key==="Enter"&&submit()}
+            autoFocus
             style={{width:"100%",background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:8,color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none"}}
           />
         </div>
@@ -234,15 +239,11 @@ function ApiKeyGate({ onKey }) {
 
         <button onClick={submit} disabled={testing||!val.trim()}
           style={{width:"100%",background:"var(--accent)",color:"#fff",border:"none",borderRadius:8,padding:"11px 0",fontFamily:"Inter,sans-serif",fontSize:14,fontWeight:600,cursor:testing?"wait":"pointer",opacity:testing||!val.trim()?0.5:1,marginTop:8}}>
-          {testing ? "Verifying…" : "Save Key and Continue"}
+          {testing ? "Checking…" : "Enter"}
         </button>
 
         <div style={{marginTop:24,padding:"16px",background:"var(--surface2)",borderRadius:8,fontSize:12,color:"var(--text-dim)",lineHeight:1.6}}>
-          <strong style={{color:"var(--text-muted)"}}>Getting a key:</strong> Go to{" "}
-          <a href="https://console.anthropic.com" target="_blank" rel="noreferrer"
-            style={{color:"var(--accent)"}}>console.anthropic.com</a>,
-          create an account, add a small credit balance (A$5–10 will last months for this tool),
-          and generate an API key under API Keys.
+          <strong style={{color:"var(--text-muted)"}}>Don't have the password?</strong> Ask whoever shared this link with you. There's nothing to sign up for and nothing to pay — just enter the password and start exploring.
         </div>
       </div>
     </div>
@@ -1055,7 +1056,7 @@ const NAV=[
 ];
 
 function App() {
-  const [apiKey,setApiKey]   = useState(()=>LS.get(STORAGE_KEYS.apiKey));
+  const [apiKey,setApiKey]   = useState(()=>LS.get(STORAGE_KEYS.access));
   const validTab = id => NAV.some(n=>n.id===id) ? id : "movers";
   const [tab,setTab]         = useState(()=>validTab((location.hash||"").replace("#","")));
 
@@ -1068,7 +1069,7 @@ function App() {
   },[]);
 
   const handleKey = k => setApiKey(k);
-  const resetKey  = () => { LS.del(STORAGE_KEYS.apiKey); setApiKey(null); };
+  const resetKey  = () => { LS.del(STORAGE_KEYS.access); setApiKey(null); };
 
   if (!apiKey) return <ApiKeyGate onKey={handleKey}/>;
 
@@ -1088,7 +1089,7 @@ function App() {
           </h1>
           <button onClick={resetKey}
             style={{background:"none",border:"1px solid var(--border)",borderRadius:6,color:"var(--text-dim)",fontSize:11,padding:"4px 10px",cursor:"pointer",fontFamily:"Inter,sans-serif"}}>
-            Change API Key
+            Sign out
           </button>
         </div>
         <p style={{fontSize:14,color:"var(--text-muted)",marginTop:6}}>Research stocks, understand price moves, compare companies, and map industry value chains.</p>
