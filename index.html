@@ -44,6 +44,7 @@ const STORAGE_KEYS = {
   research:  "sx_last_research",
   compare:   "sx_last_compare",
   chain:     "sx_last_chain",
+  watchlist: "sx_watchlist",
 };
 
 // ─── ANTHROPIC API ────────────────────────────────────────────────────────────
@@ -58,17 +59,62 @@ function friendlyError(status, err) {
   return msg;
 }
 
-// Returns { text, sources } where sources is a deduped list of web-search citations.
-async function callClaude(apiKey, sys, usr, maxTokens, useSearch) {
+function extractTextSources(data) {
+  const blocks = (data.content||[]);
+  const text = blocks.filter(b=>b.type==="text").map(b=>b.text).join("\n");
+  const sources = [], seen = new Set();
+  blocks.forEach(b=>{
+    (b.citations||[]).forEach(c=>{
+      if (c && c.url && !seen.has(c.url)) { seen.add(c.url); sources.push({ url:c.url, title:c.title||c.url }); }
+    });
+  });
+  return { text, sources };
+}
+
+// Parse the Server-Sent-Events stream, calling onDelta(fullTextSoFar) as text arrives.
+async function readStream(res, onDelta) {
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf="", text="", sources=[], seen=new Set();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream:true });
+    let nl;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl+1);
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload==="[DONE]") continue;
+      let evt; try { evt = JSON.parse(payload); } catch { continue; }
+      if (evt.type==="content_block_delta" && evt.delta) {
+        if (evt.delta.type==="text_delta") { text += evt.delta.text; onDelta(text); }
+        else if (evt.delta.type==="citations_delta" && evt.delta.citation) {
+          const c = evt.delta.citation;
+          if (c.url && !seen.has(c.url)) { seen.add(c.url); sources.push({ url:c.url, title:c.title||c.url }); }
+        }
+      } else if (evt.type==="error") {
+        throw new Error(friendlyError(0, evt.error));
+      }
+    }
+  }
+  return { text, sources };
+}
+
+// Returns { text, sources }. Pass onDelta to stream tokens as they arrive.
+async function callClaude(apiKey, sys, usr, maxTokens, useSearch, onDelta) {
+  const stream = typeof onDelta === "function";
   const body = {
     model: "claude-sonnet-4-6",
     max_tokens: maxTokens || 1200,
     system: sys,
     messages: [{ role:"user", content:usr }],
   };
+  if (stream) body.stream = true;
   if (useSearch !== false) body.tools = [{ type:"web_search_20250305", name:"web_search" }];
 
-  let data, lastStatus = 0;
+  let lastStatus = 0;
   for (let attempt=0; attempt<3; attempt++) {
     let res;
     try {
@@ -83,26 +129,22 @@ async function callClaude(apiKey, sys, usr, maxTokens, useSearch) {
       throw new Error("Network error reaching Anthropic. Check your connection and try again.");
     }
     lastStatus = res.status;
-    data = await res.json();
+    if (!res.ok) {
+      let errObj=null; try { errObj=(await res.json()).error; } catch {}
+      const retryable = res.status===429 || res.status===529 || res.status>=500;
+      if (retryable && attempt<2) { await sleep(1000*(attempt+1)*(attempt+1)); continue; }
+      throw new Error(friendlyError(res.status, errObj));
+    }
+    if (stream) return await readStream(res, onDelta);
+    const data = await res.json();
     if (data.error) {
       const retryable = res.status===429 || res.status===529 || res.status>=500;
       if (retryable && attempt<2) { await sleep(1000*(attempt+1)*(attempt+1)); continue; }
       throw new Error(friendlyError(res.status, data.error));
     }
-    break;
+    return extractTextSources(data);
   }
-  if (!data || data.error) throw new Error(friendlyError(lastStatus, data && data.error));
-
-  const blocks = (data.content||[]);
-  const text = blocks.filter(b=>b.type==="text").map(b=>b.text).join("\n");
-  const sources = [];
-  const seen = new Set();
-  blocks.forEach(b=>{
-    (b.citations||[]).forEach(c=>{
-      if (c && c.url && !seen.has(c.url)) { seen.add(c.url); sources.push({ url:c.url, title:c.title||c.url }); }
-    });
-  });
-  return { text, sources };
+  throw new Error(friendlyError(lastStatus, null));
 }
 
 // ─── API KEY GATE ─────────────────────────────────────────────────────────────
@@ -176,20 +218,145 @@ function Loader({ label }) {
   );
 }
 
-// Render inline markdown — **bold**, *italic*, `code`, [text](url) — inside a line.
-function renderInline(str, kp) {
+function StreamNote() {
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:8,marginTop:16,marginBottom:-8,color:"var(--accent2)",fontSize:12}}>
+      <span style={{width:8,height:8,borderRadius:"50%",background:"var(--accent2)",animation:"spin .8s linear infinite",display:"inline-block"}}/>
+      Generating live…
+    </div>
+  );
+}
+
+// ─── WATCHLIST ────────────────────────────────────────────────────────────────
+// Shared across tabs via localStorage + a window event so all bars stay in sync.
+function useWatchlist() {
+  const [list,setList] = useState(()=>LS.get(STORAGE_KEYS.watchlist,[]));
+  useEffect(()=>{
+    const h=()=>setList(LS.get(STORAGE_KEYS.watchlist,[]));
+    window.addEventListener("sx-watchlist",h);
+    return ()=>window.removeEventListener("sx-watchlist",h);
+  },[]);
+  const add=t=>{ t=(t||"").toUpperCase().trim(); if(!t)return; const cur=LS.get(STORAGE_KEYS.watchlist,[]); if(!cur.includes(t)){LS.set(STORAGE_KEYS.watchlist,[...cur,t]);} window.dispatchEvent(new Event("sx-watchlist")); };
+  const remove=t=>{ t=(t||"").toUpperCase().trim(); const cur=LS.get(STORAGE_KEYS.watchlist,[]); LS.set(STORAGE_KEYS.watchlist,cur.filter(x=>x!==t)); window.dispatchEvent(new Event("sx-watchlist")); };
+  const has=t=>list.includes((t||"").toUpperCase().trim());
+  return { list, add, remove, has };
+}
+
+function StarToggle({ ticker }) {
+  const { has, add, remove } = useWatchlist();
+  const t=(ticker||"").toUpperCase().trim();
+  if(!t) return null;
+  const on=has(t);
+  return (
+    <button title={on?"Remove from watchlist":"Add to watchlist"} onClick={()=>on?remove(t):add(t)}
+      style={{background:"none",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:on?"var(--accent3)":"var(--text-dim)",fontSize:16,lineHeight:1,padding:"8px 10px",cursor:"pointer"}}>
+      {on?"★":"☆"}
+    </button>
+  );
+}
+
+function WatchlistBar({ onPick, label }) {
+  const { list, remove } = useWatchlist();
+  if(!list.length) return null;
+  return (
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:16}}>
+      <span style={{fontSize:12,color:"var(--accent3)",whiteSpace:"nowrap"}}>★ {label||"Watchlist:"}</span>
+      {list.map(t=>(
+        <span key={t} style={{display:"inline-flex",alignItems:"center",gap:6,background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:20,padding:"4px 6px 4px 12px"}}>
+          <button onClick={()=>onPick(t)} title="Load and run"
+            style={{background:"none",border:"none",color:"var(--text)",fontFamily:"Space Grotesk,sans-serif",fontSize:12,fontWeight:700,letterSpacing:".03em",cursor:"pointer",padding:0}}>{t}</button>
+          <button onClick={()=>remove(t)} title="Remove"
+            style={{background:"none",border:"none",color:"var(--text-dim)",fontSize:14,lineHeight:1,cursor:"pointer",padding:0}}>×</button>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ─── GLOSSARY ─────────────────────────────────────────────────────────────────
+const GLOSSARY = {
+  "P/E": "Price-to-earnings ratio — the share price divided by earnings per share. A rough gauge of how expensive a stock is versus its profits.",
+  "P/S": "Price-to-sales ratio — market value divided by annual revenue. Useful for companies that aren't profitable yet.",
+  "P/B": "Price-to-book ratio — share price versus the company's net asset (book) value per share.",
+  "EPS": "Earnings per share — a company's profit divided by its number of shares.",
+  "EBITDA": "Earnings before interest, tax, depreciation and amortisation — a measure of core operating profit.",
+  "EV/EBITDA": "Enterprise value divided by EBITDA — a valuation multiple that accounts for debt, often used to compare companies.",
+  "market cap": "Market capitalisation — the total value of all a company's shares (share price × shares outstanding).",
+  "free cash flow": "Cash a business generates after paying for its operations and investments — money it can return to shareholders or reinvest.",
+  "cash flow": "The actual cash moving in and out of a business, as opposed to accounting profit.",
+  "gross margin": "Revenue minus the direct cost of goods sold, as a % of revenue. Shows raw product profitability.",
+  "operating margin": "Operating profit as a % of revenue — profitability after running costs but before interest and tax.",
+  "net margin": "Net profit as a % of revenue — what's left after all costs, interest and tax.",
+  "operating income": "Profit from core operations, before interest and tax.",
+  "moat": "A durable competitive advantage (brand, scale, patents, network effects) that protects a company's profits from rivals.",
+  "dividend yield": "Annual dividends per share divided by the share price — the income return a stock pays.",
+  "valuation": "An estimate of what a company or its shares are worth, often via multiples like P/E or P/S.",
+  "volatility": "How much a price swings up and down over time — a common proxy for risk.",
+  "market share": "The slice of total industry sales a company captures.",
+  "guidance": "Management's own forecast for future revenue or profit, given to investors.",
+  "ROE": "Return on equity — profit as a % of shareholders' equity; how efficiently a firm uses investors' money.",
+  "ROIC": "Return on invested capital — profit relative to all capital (debt + equity) put into the business.",
+  "balance sheet": "A snapshot of what a company owns (assets) and owes (liabilities) at a point in time.",
+  "TAM": "Total addressable market — the total revenue opportunity if a product reached every possible customer.",
+  "CAGR": "Compound annual growth rate — the smoothed yearly growth rate over a multi-year period.",
+  "short interest": "The number of shares investors have sold short, betting the price will fall.",
+};
+const GLOSSARY_KEYS = Object.keys(GLOSSARY).sort((a,b)=>b.length-a.length);
+const GLOSSARY_RE = new RegExp("("+GLOSSARY_KEYS.map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|")+")","gi");
+
+function GlossaryTerm({ term, def }) {
+  const [open,setOpen] = useState(false);
+  return (
+    <span style={{position:"relative"}}>
+      <span onClick={()=>setOpen(o=>!o)} style={{borderBottom:"1px dotted var(--accent2)",cursor:"help"}}>{term}</span>
+      {open&&(
+        <span style={{position:"absolute",left:0,top:"100%",zIndex:30,marginTop:6,display:"block",width:250,background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 12px",fontSize:12,fontWeight:400,color:"var(--text)",lineHeight:1.5,boxShadow:"0 8px 24px rgba(0,0,0,.45)",whiteSpace:"normal",textTransform:"none",letterSpacing:"normal"}}>
+          <strong style={{color:"var(--accent2)",display:"block",marginBottom:4,fontFamily:"Space Grotesk,sans-serif"}}>{term}</strong>
+          {def}
+          <span onClick={e=>{e.stopPropagation();setOpen(false);}} style={{position:"absolute",top:6,right:8,cursor:"pointer",color:"var(--text-dim)"}}>×</span>
+        </span>
+      )}
+    </span>
+  );
+}
+
+// Wrap the first occurrence of each known financial term (per result) in a tappable definition.
+function linkifyGlossary(str, kp, seen) {
+  if (!str || !seen) return [str];
+  const out=[]; let last=0, m, i=0;
+  GLOSSARY_RE.lastIndex=0;
+  while ((m = GLOSSARY_RE.exec(str)) !== null) {
+    const s=m.index, e=GLOSSARY_RE.lastIndex;
+    const before=str[s-1], after=str[e];
+    const wordy=c=>c&&/[A-Za-z0-9]/.test(c);
+    if (wordy(before)||wordy(after)) continue;            // inside a larger word — skip
+    const term=m[0], lc=term.toLowerCase();
+    if (seen.has(lc)) continue;                            // only the first mention
+    const canon=GLOSSARY_KEYS.find(k=>k.toLowerCase()===lc);
+    seen.add(lc);
+    if (s>last) out.push(str.slice(last,s));
+    out.push(<GlossaryTerm key={kp+"-g"+i} term={term} def={GLOSSARY[canon]}/>);
+    last=e; i++;
+  }
+  if (last<str.length) out.push(str.slice(last));
+  return out.length?out:[str];
+}
+
+// Render inline markdown — **bold**, *italic*, `code`, [text](url) — plus glossary terms.
+function renderInline(str, kp, gloss) {
   if (!str) return null;
   const re = /(\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\))/g;
   const nodes = []; let last=0, m, i=0;
+  const plain=(seg,k)=>{ (gloss?linkifyGlossary(seg,k,gloss):[seg]).forEach(n=>nodes.push(n)); };
   while ((m = re.exec(str)) !== null) {
-    if (m.index>last) nodes.push(str.slice(last,m.index));
+    if (m.index>last) plain(str.slice(last,m.index), kp+"-p"+i);
     if (m[2]!==undefined)       nodes.push(<strong key={kp+"-b"+i} style={{fontWeight:600,color:"var(--text)"}}>{m[2]}</strong>);
     else if (m[3]!==undefined)  nodes.push(<em key={kp+"-i"+i}>{m[3]}</em>);
     else if (m[4]!==undefined)  nodes.push(<code key={kp+"-c"+i} style={{fontFamily:"monospace",fontSize:"0.9em",background:"var(--surface2)",borderRadius:4,padding:"1px 5px"}}>{m[4]}</code>);
     else if (m[5]!==undefined)  nodes.push(<a key={kp+"-l"+i} href={m[6]} target="_blank" rel="noreferrer" style={{color:"var(--accent)"}}>{m[5]}</a>);
     last = re.lastIndex; i++;
   }
-  if (last<str.length) nodes.push(str.slice(last));
+  if (last<str.length) plain(str.slice(last), kp+"-pz");
   return nodes;
 }
 
@@ -225,18 +392,63 @@ function CopyButton({ text }) {
   );
 }
 
+const isTableLine = l => /^\s*\|.*\|\s*$/.test(l);
+const isSepRow    = cells => cells.length>0 && cells.every(c=>c===""||/^:?-+:?$/.test(c));
+const parseRow    = l => l.trim().replace(/^\|/,"").replace(/\|$/,"").split("|").map(c=>c.trim());
+
+function MdTable({ rows, kp, gloss }) {
+  if (!rows.length) return null;
+  const [head, ...body] = rows;
+  const cell = { padding:"8px 12px", borderBottom:"1px solid var(--border)", textAlign:"left", verticalAlign:"top" };
+  return (
+    <div style={{overflowX:"auto",margin:"14px 0"}}>
+      <table style={{borderCollapse:"collapse",width:"100%",fontSize:13,background:"var(--surface2)",borderRadius:"var(--radius-sm)",overflow:"hidden"}}>
+        <thead>
+          <tr>{head.map((c,i)=>(
+            <th key={i} style={{...cell,color:"var(--accent)",fontWeight:700,fontFamily:"Space Grotesk,sans-serif",fontSize:12,textTransform:"uppercase",letterSpacing:".04em",background:"var(--border)"}}>{renderInline(c,kp+"-h"+i,gloss)}</th>
+          ))}</tr>
+        </thead>
+        <tbody>
+          {body.map((r,ri)=>(
+            <tr key={ri}>{head.map((_,ci)=>(
+              <td key={ci} style={{...cell,color:"var(--text)"}}>{renderInline(r[ci]||"",kp+"-"+ri+"-"+ci,gloss)}</td>
+            ))}</tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function ParsedResult({ text, sources }) {
   if (!text) return null;
-  const els = text.split("\n").filter(Boolean).map((line,i) => {
-    if (line.startsWith("### ")) return <h4 key={i} style={{fontSize:14,fontWeight:600,color:"var(--accent2)",margin:"14px 0 6px"}}>{renderInline(line.slice(4),i)}</h4>;
-    if (line.startsWith("## "))  return <h3 key={i} style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:700,color:"var(--accent)",margin:"20px 0 8px",textTransform:"uppercase",letterSpacing:".05em"}}>{line.slice(3)}</h3>;
-    if (line.startsWith("# "))   return <h2 key={i} style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,margin:"20px 0 10px",letterSpacing:"-.01em"}}>{line.slice(2)}</h2>;
-    if (/^\*\*[^*]+\*\*$/.test(line)) return <p key={i} style={{fontSize:14,fontWeight:600,color:"var(--text)",margin:"8px 0"}}>{line.slice(2,-2)}</p>;
-    if (line.startsWith("- ")||line.startsWith("• ")) return <li key={i} style={{fontSize:14,color:"var(--text)",margin:"5px 0 5px 16px",listStyle:"none",position:"relative"}}><span style={{position:"absolute",left:-16,color:"var(--text-dim)"}}>—</span>{renderInline(line.slice(2),i)}</li>;
-    if (/^\d+\./.test(line)) return <li key={i} style={{fontSize:14,color:"var(--text)",margin:"5px 0 5px 16px",listStyle:"none",position:"relative"}}><span style={{position:"absolute",left:-16,color:"var(--accent3)"}}>›</span>{renderInline(line.replace(/^\d+\.\s*/,""),i)}</li>;
-    if (line.startsWith("---")) return <hr key={i} style={{border:"none",borderTop:"1px solid var(--border)",margin:"18px 0"}}/>;
-    return <p key={i} style={{fontSize:14,color:"var(--text)",margin:"6px 0",lineHeight:1.7}}>{renderInline(line,i)}</p>;
-  });
+  const lines = text.split("\n");
+  const gloss = new Set();          // track first glossary mention across the whole result
+  const els = [];
+  let i=0, k=0;
+  while (i<lines.length) {
+    const line = lines[i];
+    if (!line.trim()) { i++; continue; }
+
+    // Markdown table — consume the consecutive | … | block.
+    if (isTableLine(line)) {
+      const rows=[];
+      while (i<lines.length && isTableLine(lines[i])) { rows.push(parseRow(lines[i])); i++; }
+      const clean = rows.filter(r=>!isSepRow(r));
+      if (clean.length) els.push(<MdTable key={k++} rows={clean} kp={"t"+k} gloss={gloss}/>);
+      continue;
+    }
+
+    if (line.startsWith("### "))      els.push(<h4 key={k++} style={{fontSize:14,fontWeight:600,color:"var(--accent2)",margin:"14px 0 6px"}}>{renderInline(line.slice(4),k,gloss)}</h4>);
+    else if (line.startsWith("## "))  els.push(<h3 key={k++} style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:700,color:"var(--accent)",margin:"20px 0 8px",textTransform:"uppercase",letterSpacing:".05em"}}>{line.slice(3)}</h3>);
+    else if (line.startsWith("# "))   els.push(<h2 key={k++} style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,margin:"20px 0 10px",letterSpacing:"-.01em"}}>{line.slice(2)}</h2>);
+    else if (/^\*\*[^*]+\*\*$/.test(line)) els.push(<p key={k++} style={{fontSize:14,fontWeight:600,color:"var(--text)",margin:"8px 0"}}>{renderInline(line.slice(2,-2),k,gloss)}</p>);
+    else if (line.startsWith("- ")||line.startsWith("• ")) els.push(<li key={k++} style={{fontSize:14,color:"var(--text)",margin:"5px 0 5px 16px",listStyle:"none",position:"relative"}}><span style={{position:"absolute",left:-16,color:"var(--text-dim)"}}>—</span>{renderInline(line.slice(2),k,gloss)}</li>);
+    else if (/^\d+\./.test(line))     els.push(<li key={k++} style={{fontSize:14,color:"var(--text)",margin:"5px 0 5px 16px",listStyle:"none",position:"relative"}}><span style={{position:"absolute",left:-16,color:"var(--accent3)"}}>›</span>{renderInline(line.replace(/^\d+\.\s*/,""),k,gloss)}</li>);
+    else if (line.startsWith("---"))  els.push(<hr key={k++} style={{border:"none",borderTop:"1px solid var(--border)",margin:"18px 0"}}/>);
+    else els.push(<p key={k++} style={{fontSize:14,color:"var(--text)",margin:"6px 0",lineHeight:1.7}}>{renderInline(line,k,gloss)}</p>);
+    i++;
+  }
   return (
     <div style={{position:"relative",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"24px 28px",marginTop:20}}>
       <CopyButton text={text}/>
@@ -453,19 +665,21 @@ function MoverPanel({ apiKey }) {
   const applyQuick=days=>{const to=new Date(),from=new Date();from.setDate(from.getDate()-days);setDateTo(toYMD(to));setDateFrom(toYMD(from));};
   const clearCache=()=>{setResult(null);setSources(null);setTs(null);LS.del(STORAGE_KEYS.movers);};
 
-  const analyse=useCallback(async()=>{
-    if(!ticker.trim())return;
+  const analyse=useCallback(async(override)=>{
+    const tk=((typeof override==="string"?override:ticker)||"").trim();
+    if(!tk)return;
     setLoading(true);setError(null);setResult(null);setSources(null);setTs(null);
     try{
       const pd=dateFrom&&dateTo?"from "+dateFrom+" to "+dateTo:dateFrom?"from "+dateFrom+" to today":dateTo?"up to "+dateTo:"over the past month";
       const sys="You are a patient investment educator helping a young adult (18+) learn to invest.\nExplain clearly; use real numbers. Structure with these exact headings:\n## Price Performance Summary\n## Timeline of Key Events\n## The Dominant Themes\n## What This Tells Us About the Business\n## What an Investor Should Think About Now\n## One Thing to Watch Next\nExplain any jargon.";
-      const usr="Analyse the stock price movement for "+ticker.toUpperCase()+" "+pd+". Search for significant news, earnings, analyst changes, macro events. Give a clear chronological explanation an 18-year-old learning to invest would find useful.";
-      const {text,sources:src}=await callClaude(apiKey,sys,usr,1400,true);
+      const usr="Analyse the stock price movement for "+tk.toUpperCase()+" "+pd+". Search for significant news, earnings, analyst changes, macro events. Give a clear chronological explanation an 18-year-old learning to invest would find useful.";
+      const {text,sources:src}=await callClaude(apiKey,sys,usr,1400,true,setResult);
       const now=Date.now();
       setResult(text);setSources(src);setTs(now);
-      LS.set(STORAGE_KEYS.movers,{ticker,dateFrom,dateTo,result:text,sources:src,ts:now});
+      LS.set(STORAGE_KEYS.movers,{ticker:tk,dateFrom,dateTo,result:text,sources:src,ts:now});
     }catch(e){setError(e.message);}finally{setLoading(false);}
   },[ticker,dateFrom,dateTo,apiKey]);
+  const pick=t=>{setTicker(t);analyse(t);};
 
   return (
     <div style={{padding:"28px 0"}}>
@@ -474,6 +688,7 @@ function MoverPanel({ apiKey }) {
       <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
         <input placeholder="e.g. NVDA" value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&analyse()} maxLength={10}
           style={{width:120,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
+        <StarToggle ticker={ticker}/>
         <span style={{fontSize:12,color:"var(--text-muted)"}}>From</span>
         <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)}
           style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none"}}/>
@@ -486,10 +701,11 @@ function MoverPanel({ apiKey }) {
         </button>
       </div>
       <Chips items={QUICK_PERIODS.map(p=>({label:p.label,value:p}))} label="Quick:" onClick={p=>applyQuick(p.days)} style={{marginBottom:8}}/>
-      <Chips items={EXAMPLE_TICKERS} label="Examples:" onClick={t=>setTicker(t)} style={{marginBottom:24}}/>
-      {loading&&<Loader label="Researching price history and events…"/>}
+      <Chips items={EXAMPLE_TICKERS} label="Examples:" onClick={t=>setTicker(t)} style={{marginBottom:16}}/>
+      <WatchlistBar onPick={pick}/>
+      {loading&&!result&&<Loader label="Researching price history and events…"/>}
       {error&&<div style={{background:"#1e1010",border:"1px solid #4a1e1e",borderRadius:"var(--radius-sm)",color:"var(--danger)",padding:"14px 16px",fontSize:13,marginTop:12}}>⚠️ {error}</div>}
-      {result&&<><CachedBanner timestamp={ts} onClear={clearCache}/><ParsedResult text={result} sources={sources}/></>}
+      {result&&<>{ts&&<CachedBanner timestamp={ts} onClear={clearCache}/>}{loading&&<StreamNote/>}<ParsedResult text={result} sources={sources}/></>}
     </div>
   );
 }
@@ -505,17 +721,35 @@ function ResearchPanel({ apiKey }) {
   const [error,setError]=useState(null);
   const clearCache=()=>{setResult(null);setSources(null);setTs(null);LS.del(STORAGE_KEYS.research);};
 
-  const research=useCallback(async()=>{
-    if(!ticker.trim())return;
+  const research=useCallback(async(override)=>{
+    const tk=((typeof override==="string"?override:ticker)||"").trim();
+    if(!tk)return;
     setLoading(true);setError(null);setResult(null);setSources(null);setTs(null);
     try{
-      const sys="You are a patient investment educator helping an 18-year-old learn to invest.\nBe thorough but clear. Use real current figures. Structure with:\n## What Does This Company Actually Do\n## How It Makes Money (Business Model)\n## Recent Financial Health (Revenue, Profit, Growth)\n## Competitive Position — Who Are the Rivals?\n## Key Risks\n## What the Market Currently Thinks (valuation, analyst sentiment)\n## Verdict — Is This an Interesting Investment to Learn From?\nBe specific with numbers.";
-      const usr="Research "+ticker.toUpperCase()+" as an investment. Find latest earnings, revenue growth, competitive position, valuation multiples, analyst views. Write a complete profile for a young investor.";
-      const {text,sources:src}=await callClaude(apiKey,sys,usr,1400,true);
+      const sys=[
+        "You are a patient investment educator helping an 18-year-old learn to invest.",
+        "Be thorough but clear. Use real current figures. Structure with these exact headings:",
+        "## What Does This Company Actually Do",
+        "## How It Makes Money (Business Model)",
+        "## Recent Financial Health (Revenue, Profit, Growth)",
+        "In THIS section, present the headline figures as a Markdown table FIRST, using exactly this format:",
+        "| Metric | Most Recent | Year Ago | Change |",
+        "| --- | --- | --- | --- |",
+        "Include rows for: Revenue, Gross margin, Operating income, Net income, Diluted EPS, and Free cash flow (use the latest reported full year or trailing-twelve-months; write \"n/a\" if a figure isn't available). Put the % or absolute change in the Change column.",
+        "After the table, add 2-3 sentences of plain-English interpretation of what the numbers show.",
+        "## Competitive Position — Who Are the Rivals?",
+        "## Key Risks",
+        "## What the Market Currently Thinks (valuation, analyst sentiment)",
+        "## Verdict — Is This an Interesting Investment to Learn From?",
+        "Be specific with numbers. Explain any jargon. Complete EVERY section fully — do not stop mid-section or run out before the Verdict.",
+      ].join("\n");
+      const usr="Research "+tk.toUpperCase()+" as an investment. Find latest earnings, revenue growth, competitive position, valuation multiples, analyst views. Write a complete profile for a young investor. Make sure you finish all sections through to the Verdict.";
+      const {text,sources:src}=await callClaude(apiKey,sys,usr,4000,true,setResult);
       const now=Date.now();setResult(text);setSources(src);setTs(now);
-      LS.set(STORAGE_KEYS.research,{ticker,result:text,sources:src,ts:now});
+      LS.set(STORAGE_KEYS.research,{ticker:tk,result:text,sources:src,ts:now});
     }catch(e){setError(e.message);}finally{setLoading(false);}
   },[ticker,apiKey]);
+  const pick=t=>{setTicker(t);research(t);};
 
   return (
     <div style={{padding:"28px 0"}}>
@@ -524,15 +758,17 @@ function ResearchPanel({ apiKey }) {
       <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
         <input placeholder="e.g. AAPL" value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&research()} maxLength={10}
           style={{width:130,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
+        <StarToggle ticker={ticker}/>
         <button onClick={research} disabled={loading||!ticker.trim()}
           style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!ticker.trim()?"not-allowed":"pointer",opacity:loading||!ticker.trim()?.5:1}}>
           {loading?"…":"Research"}
         </button>
       </div>
-      <Chips items={EXAMPLE_TICKERS} onClick={t=>setTicker(t)} style={{marginBottom:24}}/>
-      {loading&&<Loader label="Researching company fundamentals…"/>}
+      <Chips items={EXAMPLE_TICKERS} onClick={t=>setTicker(t)} style={{marginBottom:16}}/>
+      <WatchlistBar onPick={pick}/>
+      {loading&&!result&&<Loader label="Researching company fundamentals…"/>}
       {error&&<div style={{background:"#1e1010",border:"1px solid #4a1e1e",borderRadius:"var(--radius-sm)",color:"var(--danger)",padding:"14px 16px",fontSize:13}}>⚠️ {error}</div>}
-      {result&&<><CachedBanner timestamp={ts} onClear={clearCache}/><ParsedResult text={result} sources={sources}/></>}
+      {result&&<>{ts&&<CachedBanner timestamp={ts} onClear={clearCache}/>}{loading&&<StreamNote/>}<ParsedResult text={result} sources={sources}/></>}
     </div>
   );
 }
@@ -551,15 +787,32 @@ function ComparePanel({ apiKey }) {
 
   const compare=useCallback(async()=>{
     if(!tickerA.trim()||!tickerB.trim())return;
+    const A=tickerA.toUpperCase(), B=tickerB.toUpperCase();
     setLoading(true);setError(null);setResult(null);setSources(null);setTs(null);
     try{
-      const sys="You are a patient investment educator helping an 18-year-old compare stocks.\nStructure with:\n## Side-by-Side Snapshot (key metrics)\n## Business Model Comparison\n## Growth and Financials\n## Valuation — Which Looks Cheaper and Why\n## Risk Profile\n## Who Has the Stronger Competitive Moat?\n## Which Might Be More Interesting to a Young Investor, and Why?\nBe specific with numbers. Explain financial terms.";
-      const usr="Compare "+tickerA.toUpperCase()+" vs "+tickerB.toUpperCase()+" as investments. Search for latest data — revenue growth, profit margins, P/E or P/S ratios, competitive position, recent news.";
-      const {text,sources:src}=await callClaude(apiKey,sys,usr,1400,true);
+      const sys=[
+        "You are a patient investment educator helping an 18-year-old compare stocks.",
+        "Structure with these exact headings:",
+        "## Side-by-Side Snapshot (key metrics)",
+        "In THIS section, present the comparison as a Markdown table FIRST, using exactly this format:",
+        "| Metric | "+A+" | "+B+" |",
+        "| --- | --- | --- |",
+        "Include rows for: Market cap, Revenue (latest FY), Revenue growth, Gross margin, Operating margin, Net income, P/E, P/S, and Free cash flow (write \"n/a\" if unavailable).",
+        "## Business Model Comparison",
+        "## Growth and Financials",
+        "## Valuation — Which Looks Cheaper and Why",
+        "## Risk Profile",
+        "## Who Has the Stronger Competitive Moat?",
+        "## Which Might Be More Interesting to a Young Investor, and Why?",
+        "Be specific with numbers. Explain financial terms. Complete every section fully.",
+      ].join("\n");
+      const usr="Compare "+A+" vs "+B+" as investments. Search for latest data — revenue growth, profit margins, P/E or P/S ratios, competitive position, recent news.";
+      const {text,sources:src}=await callClaude(apiKey,sys,usr,2600,true,setResult);
       const now=Date.now();setResult(text);setSources(src);setTs(now);
       LS.set(STORAGE_KEYS.compare,{tickerA,tickerB,result:text,sources:src,ts:now});
     }catch(e){setError(e.message);}finally{setLoading(false);}
   },[tickerA,tickerB,apiKey]);
+  const pick=t=>{ if(!tickerA.trim())setTickerA(t); else if(!tickerB.trim())setTickerB(t); else setTickerA(t); };
 
   const PAIRS=[["NVDA","AMD"],["AAPL","MSFT"],["TSLA","RIVN"]];
   return (
@@ -567,20 +820,23 @@ function ComparePanel({ apiKey }) {
       <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Compare Stocks</h2>
       <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:24}}>Put two companies head-to-head on financials, valuation, competitive position, and risk.</p>
       <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
-        <input placeholder="Ticker A" value={tickerA} onChange={e=>setTickerA(e.target.value.toUpperCase())} maxLength={10}
+        <input placeholder="Ticker A" value={tickerA} onChange={e=>setTickerA(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&compare()} maxLength={10}
           style={{width:120,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
+        <StarToggle ticker={tickerA}/>
         <span style={{fontFamily:"Space Grotesk,sans-serif",fontSize:12,fontWeight:700,color:"var(--text-dim)",letterSpacing:".1em"}}>VS</span>
-        <input placeholder="Ticker B" value={tickerB} onChange={e=>setTickerB(e.target.value.toUpperCase())} maxLength={10}
+        <input placeholder="Ticker B" value={tickerB} onChange={e=>setTickerB(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&compare()} maxLength={10}
           style={{width:120,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
+        <StarToggle ticker={tickerB}/>
         <button onClick={compare} disabled={loading||!tickerA.trim()||!tickerB.trim()}
           style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!tickerA.trim()||!tickerB.trim()?"not-allowed":"pointer",opacity:loading||!tickerA.trim()||!tickerB.trim()?.5:1}}>
           {loading?"…":"Compare"}
         </button>
       </div>
-      <Chips items={PAIRS.map(([a,b])=>({label:a+" vs "+b,value:{a,b}}))} onClick={p=>{setTickerA(p.a);setTickerB(p.b);}} style={{marginBottom:24}}/>
-      {loading&&<Loader label="Comparing both companies…"/>}
+      <Chips items={PAIRS.map(([a,b])=>({label:a+" vs "+b,value:{a,b}}))} onClick={p=>{setTickerA(p.a);setTickerB(p.b);}} style={{marginBottom:16}}/>
+      <WatchlistBar onPick={pick} label="Watchlist (fills next slot):"/>
+      {loading&&!result&&<Loader label="Comparing both companies…"/>}
       {error&&<div style={{background:"#1e1010",border:"1px solid #4a1e1e",borderRadius:"var(--radius-sm)",color:"var(--danger)",padding:"14px 16px",fontSize:13}}>⚠️ {error}</div>}
-      {result&&<><CachedBanner timestamp={ts} onClear={clearCache}/><ParsedResult text={result} sources={sources}/></>}
+      {result&&<>{ts&&<CachedBanner timestamp={ts} onClear={clearCache}/>}{loading&&<StreamNote/>}<ParsedResult text={result} sources={sources}/></>}
     </div>
   );
 }
@@ -666,7 +922,7 @@ function ChainPanel({ apiKey }) {
         "CRITICAL: Use only stage names and numbers from the canonical list. Do not skip any stage. Do not stop early.",
       ].join("\n");
       const writtenUsr="Write the complete stage-by-stage breakdown for ALL "+industry+" industry stages listed above, then the four analysis sections. Search for real current company data. Cover every stage. Do not stop early.";
-      const {text,sources:src}=await callClaude(apiKey,writtenSys,writtenUsr,4000,true);
+      const {text,sources:src}=await callClaude(apiKey,writtenSys,writtenUsr,4000,true,setResult);
       const now=Date.now();
       setResult(text);setSources(src);setTs(now);
       LS.set(STORAGE_KEYS.chain,{industry,chainData:parsedData,result:text,sources:src,ts:now});
@@ -674,17 +930,20 @@ function ChainPanel({ apiKey }) {
     finally{setLoading(false);setLoadingStep("");}
   },[industry,apiKey]);
 
-  const drillDown=useCallback(async()=>{
-    if(!focusTicker.trim())return;
+  const drillDown=useCallback(async(override)=>{
+    const tk=((typeof override==="string"?override:focusTicker)||"").trim();
+    if(!tk)return;
     setFocusLoading(true);setFocusResult(null);setFocusSources(null);
     try{
-      const sys="You are helping a young investor drill into a specific company in an industry chain.\nBe specific and educational. Use these headings:\n## Where "+focusTicker.toUpperCase()+" Sits in the Chain\n## What Makes This Position Interesting (or not)\n## Key Financials and Recent Performance\n## How Exposed Is It to the Rest of the Chain?\n## Should This Be on a Watch List?";
-      const usr="Drill into "+focusTicker.toUpperCase()+" as part of the "+industry+" value chain. Search for current information — its specific role, recent financials, news, competitive position. Write for a young investor.";
-      const {text,sources:src}=await callClaude(apiKey,sys,usr,1400,true);
+      const T=tk.toUpperCase();
+      const sys="You are helping a young investor drill into a specific company in an industry chain.\nBe specific and educational. Use these headings:\n## Where "+T+" Sits in the Chain\n## What Makes This Position Interesting (or not)\n## Key Financials and Recent Performance\n## How Exposed Is It to the Rest of the Chain?\n## Should This Be on a Watch List?";
+      const usr="Drill into "+T+" as part of the "+industry+" value chain. Search for current information — its specific role, recent financials, news, competitive position. Write for a young investor.";
+      const {text,sources:src}=await callClaude(apiKey,sys,usr,1400,true,setFocusResult);
       setFocusResult(text);setFocusSources(src);
     }catch(e){setFocusResult("Error: "+e.message);}
     finally{setFocusLoading(false);}
   },[focusTicker,industry,apiKey]);
+  const pickFocus=t=>{setFocusTicker(t);drillDown(t);};
 
   return (
     <div style={{padding:"28px 0"}}>
@@ -700,27 +959,32 @@ function ChainPanel({ apiKey }) {
         </button>
       </div>
       <Chips items={EXAMPLE_INDUSTRIES} onClick={v=>setIndustry(v)} style={{marginBottom:24}}/>
-      {loading&&<Loader label={loadingStep||"Mapping value chain…"}/>}
+      {loading&&!result&&<Loader label={loadingStep||"Mapping value chain…"}/>}
       {error&&<div style={{background:"#1e1010",border:"1px solid #4a1e1e",borderRadius:"var(--radius-sm)",color:"var(--danger)",padding:"14px 16px",fontSize:13}}>⚠️ {error}</div>}
       {chainData&&<FlowDiagram stages={chainData.stages} edges={chainData.edges}/>}
       {result&&(
         <>
-          <CachedBanner timestamp={ts} onClear={clearCache}/>
+          {ts&&<CachedBanner timestamp={ts} onClear={clearCache}/>}
+          {loading&&<StreamNote/>}
           <ParsedResult text={result} sources={sources}/>
+          {ts&&(
           <div style={{marginTop:32,background:"var(--surface2)",border:"1px solid var(--border)",borderLeft:"3px solid var(--accent3)",borderRadius:"var(--radius)",padding:"24px 28px"}}>
             <h3 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:700,marginBottom:6}}>🔎 Drill into a Company from This Chain</h3>
             <p style={{fontSize:13,color:"var(--text-muted)",marginBottom:16}}>Spotted a company above? Enter its ticker for a focused deep-dive.</p>
             <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
               <input placeholder="e.g. ASML" value={focusTicker} onChange={e=>setFocusTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&drillDown()} maxLength={10}
                 style={{width:120,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
+              <StarToggle ticker={focusTicker}/>
               <button onClick={drillDown} disabled={focusLoading||!focusTicker.trim()}
                 style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--surface2)",border:"1px solid var(--border)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:focusLoading||!focusTicker.trim()?"not-allowed":"pointer",opacity:focusLoading||!focusTicker.trim()?.5:1}}>
                 {focusLoading?"…":"Drill Down"}
               </button>
             </div>
-            {focusLoading&&<Loader label="Researching this company's role in the chain…"/>}
-            {focusResult&&<ParsedResult text={focusResult} sources={focusSources}/>}
+            <WatchlistBar onPick={pickFocus} label="Watchlist:"/>
+            {focusLoading&&!focusResult&&<Loader label="Researching this company's role in the chain…"/>}
+            {focusResult&&<>{focusLoading&&<StreamNote/>}<ParsedResult text={focusResult} sources={focusSources}/></>}
           </div>
+          )}
         </>
       )}
     </div>
@@ -773,6 +1037,7 @@ function App() {
           </button>
         </div>
         <p style={{fontSize:14,color:"var(--text-muted)",marginTop:6}}>Research stocks, understand price moves, compare companies, and map industry value chains.</p>
+        <p style={{fontSize:12,color:"var(--text-dim)",marginTop:6}}>Tip: tap <span style={{color:"var(--accent3)"}}>☆</span> to save a ticker to your watchlist, and tap any <span style={{borderBottom:"1px dotted var(--accent2)"}}>underlined term</span> for a plain-English definition.</p>
       </div>
 
       {/* Nav */}
