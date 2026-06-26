@@ -807,7 +807,7 @@ function ComparePanel({ apiKey }) {
         "Be specific with numbers. Explain financial terms. Complete every section fully.",
       ].join("\n");
       const usr="Compare "+A+" vs "+B+" as investments. Search for latest data — revenue growth, profit margins, P/E or P/S ratios, competitive position, recent news.";
-      const {text,sources:src}=await callClaude(apiKey,sys,usr,2600,true,setResult);
+      const {text,sources:src}=await callClaude(apiKey,sys,usr,4000,true,setResult);
       const now=Date.now();setResult(text);setSources(src);setTs(now);
       LS.set(STORAGE_KEYS.compare,{tickerA,tickerB,result:text,sources:src,ts:now});
     }catch(e){setError(e.message);}finally{setLoading(false);}
