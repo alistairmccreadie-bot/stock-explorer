@@ -59,15 +59,18 @@ function friendlyError(status, err) {
   return msg;
 }
 
+const TRUNC_NOTE = "\n\n---\n*⚠️ This answer reached the length limit and was cut off. Re-run it, or ask for fewer details / a single section.*";
+
 function extractTextSources(data) {
   const blocks = (data.content||[]);
-  const text = blocks.filter(b=>b.type==="text").map(b=>b.text).join("\n");
+  let text = blocks.filter(b=>b.type==="text").map(b=>b.text).join("\n");
   const sources = [], seen = new Set();
   blocks.forEach(b=>{
     (b.citations||[]).forEach(c=>{
       if (c && c.url && !seen.has(c.url)) { seen.add(c.url); sources.push({ url:c.url, title:c.title||c.url }); }
     });
   });
+  if (data.stop_reason==="max_tokens") text += TRUNC_NOTE;
   return { text, sources };
 }
 
@@ -75,7 +78,7 @@ function extractTextSources(data) {
 async function readStream(res, onDelta) {
   const reader = res.body.getReader();
   const dec = new TextDecoder();
-  let buf="", text="", sources=[], seen=new Set();
+  let buf="", text="", sources=[], seen=new Set(), truncated=false;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -94,11 +97,14 @@ async function readStream(res, onDelta) {
           const c = evt.delta.citation;
           if (c.url && !seen.has(c.url)) { seen.add(c.url); sources.push({ url:c.url, title:c.title||c.url }); }
         }
+      } else if (evt.type==="message_delta" && evt.delta && evt.delta.stop_reason==="max_tokens") {
+        truncated = true;
       } else if (evt.type==="error") {
         throw new Error(friendlyError(0, evt.error));
       }
     }
   }
+  if (truncated) text += TRUNC_NOTE;
   return { text, sources };
 }
 
@@ -673,7 +679,7 @@ function MoverPanel({ apiKey }) {
       const pd=dateFrom&&dateTo?"from "+dateFrom+" to "+dateTo:dateFrom?"from "+dateFrom+" to today":dateTo?"up to "+dateTo:"over the past month";
       const sys="You are a patient investment educator helping a young adult (18+) learn to invest.\nExplain clearly; use real numbers. Structure with these exact headings:\n## Price Performance Summary\n## Timeline of Key Events\n## The Dominant Themes\n## What This Tells Us About the Business\n## What an Investor Should Think About Now\n## One Thing to Watch Next\nExplain any jargon.";
       const usr="Analyse the stock price movement for "+tk.toUpperCase()+" "+pd+". Search for significant news, earnings, analyst changes, macro events. Give a clear chronological explanation an 18-year-old learning to invest would find useful.";
-      const {text,sources:src}=await callClaude(apiKey,sys,usr,1400,true,setResult);
+      const {text,sources:src}=await callClaude(apiKey,sys,usr,2500,true,setResult);
       const now=Date.now();
       setResult(text);setSources(src);setTs(now);
       LS.set(STORAGE_KEYS.movers,{ticker:tk,dateFrom,dateTo,result:text,sources:src,ts:now});
@@ -807,7 +813,7 @@ function ComparePanel({ apiKey }) {
         "Be specific with numbers. Explain financial terms. Complete every section fully.",
       ].join("\n");
       const usr="Compare "+A+" vs "+B+" as investments. Search for latest data — revenue growth, profit margins, P/E or P/S ratios, competitive position, recent news.";
-      const {text,sources:src}=await callClaude(apiKey,sys,usr,4000,true,setResult);
+      const {text,sources:src}=await callClaude(apiKey,sys,usr,8000,true,setResult);
       const now=Date.now();setResult(text);setSources(src);setTs(now);
       LS.set(STORAGE_KEYS.compare,{tickerA,tickerB,result:text,sources:src,ts:now});
     }catch(e){setError(e.message);}finally{setLoading(false);}
@@ -938,7 +944,7 @@ function ChainPanel({ apiKey }) {
       const T=tk.toUpperCase();
       const sys="You are helping a young investor drill into a specific company in an industry chain.\nBe specific and educational. Use these headings:\n## Where "+T+" Sits in the Chain\n## What Makes This Position Interesting (or not)\n## Key Financials and Recent Performance\n## How Exposed Is It to the Rest of the Chain?\n## Should This Be on a Watch List?";
       const usr="Drill into "+T+" as part of the "+industry+" value chain. Search for current information — its specific role, recent financials, news, competitive position. Write for a young investor.";
-      const {text,sources:src}=await callClaude(apiKey,sys,usr,1400,true,setFocusResult);
+      const {text,sources:src}=await callClaude(apiKey,sys,usr,2500,true,setFocusResult);
       setFocusResult(text);setFocusSources(src);
     }catch(e){setFocusResult("Error: "+e.message);}
     finally{setFocusLoading(false);}
