@@ -4,15 +4,14 @@
 // Routes (all on the same Worker URL):
 //   POST /          → proxy a request to Anthropic   (gated by ACCESS_PASSWORD)
 //   GET  /library   → read the shared chain library   (gated by ACCESS_PASSWORD)
-//   POST /library   → save/delete a chain             (gated by ADMIN_PASSWORD)
+//   POST /library   → save/delete a chain             (gated by ACCESS_PASSWORD)
 //
 // Your Anthropic key is held server-side and never reaches any browser.
 //
 // Set in the Cloudflare dashboard → your Worker → Settings:
 //   Secrets (Variables and Secrets):
 //     ANTHROPIC_API_KEY  — your Anthropic key (sk-ant-...)
-//     ACCESS_PASSWORD    — shared password to USE the app and OPEN saved chains
-//     ADMIN_PASSWORD     — your private password to ADD / REFRESH / DELETE chains
+//     ACCESS_PASSWORD    — shared password to use the app, open saved chains, and save chains
 //   Binding (KV namespace binding):
 //     Variable name: LIBRARY   →  bind to your KV namespace
 //   (optional) Plaintext variable:
@@ -28,7 +27,7 @@ export default {
     const cors = {
       "Access-Control-Allow-Origin": origin,
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, x-access-code, x-admin-code",
+      "Access-Control-Allow-Headers": "Content-Type, x-access-code",
       "Access-Control-Max-Age": "86400",
     };
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
@@ -50,11 +49,7 @@ export default {
       }
 
       if (request.method === "POST") {
-        const admin = (env.ADMIN_PASSWORD || "").trim();
-        if (!admin) return json({ error: { message: "Server has no ADMIN_PASSWORD secret. Add it under Settings → Variables and Secrets, then Deploy." } }, 500, cors);
-        if ((request.headers.get("x-admin-code") || "").trim() !== admin) {
-          return json({ error: { message: "Wrong admin password." } }, 401, cors);
-        }
+        if (!accessOk) return json({ error: { message: "Wrong access password." } }, 401, cors);
         let payload;
         try { payload = JSON.parse(await request.text()); } catch { return json({ error: { message: "Bad request body" } }, 400, cors); }
 

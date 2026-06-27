@@ -45,7 +45,6 @@ const STORAGE_KEYS = {
   compare:   "sx_last_compare",
   chain:     "sx_last_chain",
   chainLib:  "sx_chain_library",
-  adminCode: "sx_admin_code",
   watchlist: "sx_watchlist",
 };
 
@@ -201,10 +200,10 @@ async function libraryGet(access) {
   if (!res.ok) throw new Error(friendlyError(res.status, data.error));
   return data.entries || [];
 }
-async function libraryWrite(access, adminCode, payload) {
+async function libraryWrite(access, payload) {
   const res = await fetch(PROXY_URL + "/library", {
     method:"POST",
-    headers:{ "Content-Type":"application/json", "x-access-code":access, "x-admin-code":adminCode },
+    headers:{ "Content-Type":"application/json", "x-access-code":access },
     body: JSON.stringify(payload),
   });
   const data = await res.json().catch(()=>({}));
@@ -918,7 +917,6 @@ function ChainPanel({ apiKey }) {
   const [focusSources,setFocusSources] = useState(null);
   const [focusLoading,setFocusLoading] = useState(false);
   const [lib,setLib]                   = useState(()=>LS.get(STORAGE_KEYS.chainLib,[]));
-  const [adminCode,setAdminCode]       = useState(()=>LS.get(STORAGE_KEYS.adminCode,null));
   const [libMsg,setLibMsg]             = useState("");
   const clearCache=()=>{setResult(null);setSources(null);setChainData(null);setTs(null);LS.del(STORAGE_KEYS.chain);};
 
@@ -943,29 +941,18 @@ function ChainPanel({ apiKey }) {
     LS.set(STORAGE_KEYS.chain,{industry:entry.industry,chainData:entry.chainData,result:entry.result,sources:entry.sources,ts:entry.ts});
   };
 
-  const unlockAdmin=()=>{
-    const code=window.prompt("Enter the curator password to add, refresh or remove saved chains:");
-    if(code==null) return;
-    const c=code.trim(); setAdminCode(c); LS.set(STORAGE_KEYS.adminCode,c);
-    setLibMsg("Curator mode on — chains you run are now saved to the shared library automatically.");
-  };
-  const exitAdmin=()=>{ setAdminCode(null); LS.del(STORAGE_KEYS.adminCode); setLibMsg(""); };
-
-  const clearAdminIfRejected=msg=>{ if(/admin password/i.test(msg)){ setAdminCode(null); LS.del(STORAGE_KEYS.adminCode); } };
-
   const saveCurrent=async()=>{
-    if(!adminCode||!result) return;
+    if(!result) return;
     try{
-      const entries=await libraryWrite(apiKey,adminCode,{action:"save",entry:{industry,chainData,result,sources,ts:ts||Date.now()}});
+      const entries=await libraryWrite(apiKey,{action:"save",entry:{industry,chainData,result,sources,ts:ts||Date.now()}});
       setLib(entries); LS.set(STORAGE_KEYS.chainLib,entries); setLibMsg("✓ Saved to the shared library.");
-    }catch(e){ setLibMsg("Couldn't save: "+e.message); clearAdminIfRejected(e.message); }
+    }catch(e){ setLibMsg("Couldn't save: "+e.message); }
   };
   const deleteChain=async(industryName)=>{
-    if(!adminCode) return;
     try{
-      const entries=await libraryWrite(apiKey,adminCode,{action:"delete",key:industryName});
+      const entries=await libraryWrite(apiKey,{action:"delete",key:industryName});
       setLib(entries); LS.set(STORAGE_KEYS.chainLib,entries);
-    }catch(e){ setLibMsg("Couldn't remove: "+e.message); clearAdminIfRejected(e.message); }
+    }catch(e){ setLibMsg("Couldn't remove: "+e.message); }
   };
 
   const exploreChain=useCallback(async()=>{
@@ -1042,16 +1029,14 @@ function ChainPanel({ apiKey }) {
       const now=Date.now();
       setResult(text);setSources(src);setTs(now);
       LS.set(STORAGE_KEYS.chain,{industry,chainData:parsedData,result:text,sources:src,ts:now});
-      // Curator: save/refresh this chain in the shared library automatically.
-      if(adminCode){
-        try{
-          const entries=await libraryWrite(apiKey,adminCode,{action:"save",entry:{industry,chainData:parsedData,result:text,sources:src,ts:now}});
-          setLib(entries); LS.set(STORAGE_KEYS.chainLib,entries); setLibMsg("✓ Saved to the shared library.");
-        }catch(e){ setLibMsg("Ran fine, but couldn't save to library: "+e.message); clearAdminIfRejected(e.message); }
-      }
+      // Save/refresh this chain in the shared family library automatically.
+      try{
+        const entries=await libraryWrite(apiKey,{action:"save",entry:{industry,chainData:parsedData,result:text,sources:src,ts:now}});
+        setLib(entries); LS.set(STORAGE_KEYS.chainLib,entries); setLibMsg("✓ Saved to the shared library.");
+      }catch(e){ setLibMsg("Ran fine, but couldn't save to library: "+e.message); }
     }catch(e){setError(e.message);}
     finally{setLoading(false);setLoadingStep("");}
-  },[industry,apiKey,adminCode]);
+  },[industry,apiKey]);
 
   const drillDown=useCallback(async(override)=>{
     const tk=((typeof override==="string"?override:focusTicker)||"").trim();
@@ -1092,10 +1077,10 @@ function ChainPanel({ apiKey }) {
       </div>
       <Chips items={EXAMPLE_INDUSTRIES} onClick={v=>setIndustry(v)} style={{marginBottom:16}}/>
 
-      {/* Saved chain library */}
+      {/* Saved chain library — shared across the family. Anyone can open, save, or remove. */}
       {lib.length>0&&(
         <div style={{marginBottom:16}}>
-          <div style={{fontSize:12,color:"var(--accent3)",marginBottom:8}}>📚 Saved chains — click to open instantly:</div>
+          <div style={{fontSize:12,color:"var(--accent3)",marginBottom:8}}>📚 Saved chains — click to open instantly (× to remove):</div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             {lib.map(e=>{
               const active=(industry||"").trim().toLowerCase()===(e.industry||"").trim().toLowerCase();
@@ -1104,8 +1089,8 @@ function ChainPanel({ apiKey }) {
                   style={{display:"inline-flex",alignItems:"center",gap:6,background:"var(--surface2)",border:"1px solid "+(active?"var(--accent)":"var(--border)"),borderRadius:20,padding:"4px 6px 4px 12px"}}>
                   <button onClick={()=>pickChain(e)}
                     style={{background:"none",border:"none",color:active?"var(--accent)":"var(--text)",fontSize:12,fontWeight:600,cursor:"pointer",padding:0}}>{e.industry}</button>
-                  {adminCode&&<button onClick={()=>deleteChain(e.industry)} title="Remove from library"
-                    style={{background:"none",border:"none",color:"var(--text-dim)",fontSize:14,lineHeight:1,cursor:"pointer",padding:0}}>×</button>}
+                  <button onClick={()=>deleteChain(e.industry)} title="Remove from library"
+                    style={{background:"none",border:"none",color:"var(--text-dim)",fontSize:14,lineHeight:1,cursor:"pointer",padding:0}}>×</button>
                 </span>
               );
             })}
@@ -1113,17 +1098,9 @@ function ChainPanel({ apiKey }) {
         </div>
       )}
 
-      {/* Curator controls */}
       <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:20,fontSize:12,color:"var(--text-dim)"}}>
-        {adminCode ? (
-          <>
-            <span style={{color:"var(--accent2)"}}>🔓 Curator mode — chains you run are saved automatically.</span>
-            {result&&<button onClick={saveCurrent} style={{background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:6,color:"var(--text)",fontSize:12,padding:"4px 10px",cursor:"pointer",fontFamily:"Inter,sans-serif"}}>💾 Save current to library</button>}
-            <button onClick={exitAdmin} style={{background:"none",border:"none",color:"var(--accent)",fontSize:12,cursor:"pointer",fontFamily:"Inter,sans-serif"}}>Exit curator mode</button>
-          </>
-        ) : (
-          <button onClick={unlockAdmin} style={{background:"none",border:"1px solid var(--border)",borderRadius:6,color:"var(--text-dim)",fontSize:12,padding:"4px 10px",cursor:"pointer",fontFamily:"Inter,sans-serif"}}>🔑 Curator login</button>
-        )}
+        <span>Chains you run are saved to the shared library automatically.</span>
+        {result&&!inLib&&<button onClick={saveCurrent} style={{background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:6,color:"var(--text)",fontSize:12,padding:"4px 10px",cursor:"pointer",fontFamily:"Inter,sans-serif"}}>💾 Save current to library</button>}
         {libMsg&&<span style={{color:libMsg.startsWith("✓")?"var(--success)":"var(--text-muted)"}}>{libMsg}</span>}
       </div>
 
