@@ -46,6 +46,7 @@ const STORAGE_KEYS = {
   chain:     "sx_last_chain",
   chainLib:  "sx_chain_library",
   panel:     "sx_last_panel",
+  valuation: "sx_last_valuation",
   watchlist: "sx_watchlist",
 };
 
@@ -1260,10 +1261,67 @@ function PanelTab({ apiKey }) {
   );
 }
 
+// ─── PANEL: Valuation ─────────────────────────────────────────────────────────
+function ValuationPanel({ apiKey }) {
+  const saved=LS.get(STORAGE_KEYS.valuation);
+  const [ticker,setTicker]=useState(saved?.ticker||"");
+  const [result,setResult]=useState(saved?.result||null);
+  const [sources,setSources]=useState(saved?.sources||null);
+  const [ts,setTs]=useState(saved?.ts||null);
+  const [loading,setLoading]=useState(false);
+  const [error,setError]=useState(null);
+  const clearCache=()=>{setResult(null);setSources(null);setTs(null);LS.del(STORAGE_KEYS.valuation);};
+
+  const analyse=useCallback(async(override)=>{
+    const tk=((typeof override==="string"?override:ticker)||"").trim();
+    if(!tk)return;
+    setLoading(true);setError(null);setResult(null);setSources(null);setTs(null);
+    try{
+      const T=tk.toUpperCase();
+      const sys=buildSys(
+        "You are an investment educator helping an 18-year-old judge whether a stock is cheaply or expensively valued versus its industry and its own history. Be specific with real, recent numbers and clearly name the sector/peer group you compare against.",
+        [
+          {h:"Where "+T+" Trades Today", d:"A Markdown table with columns: | Metric | "+T+" now | "+T+" 5-yr avg | Industry now | Industry 5-yr avg |. Rows: the most relevant of Forward P/E, P/E, P/S, EV/EBITDA, P/B, PEG, Dividend yield. Use \"n/a\" where a metric doesn't apply or isn't available."},
+          {h:"Read on the Multiple", d:"Begin by naming the industry / peer group used. Then 2-4 sentences: is "+T+" cheap or expensive versus its industry and versus its own history, and what justifies any premium or discount (growth, margins, quality, risk)?"},
+          {h:"Path to Fair Value", d:"A Markdown table with columns: | Scenario | What would have to happen | Implied share-price move |. Include at least three rows: re-rate to the industry-average multiple at today's earnings; grow into today's multiple via earnings growth (no price change); and a balanced mix of both. Then ONE sentence on the realistic catalysts that could drive a re-rating."},
+          {h:"What Today's Price Assumes", d:"1-3 sentences on the earnings growth and/or margins the current multiple implies — i.e., the expectations baked into the price."},
+        ]
+      );
+      const usr="Analyse the valuation of "+T+" versus its industry/sector and its own ~5-year history. Search for current and historical valuation multiples for both the company and its peer group. Follow the required format exactly.";
+      const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult);
+      const now=Date.now();setResult(text);setSources(src);setTs(now);
+      LS.set(STORAGE_KEYS.valuation,{ticker:tk,result:text,sources:src,ts:now});
+    }catch(e){setError(e.message);}finally{setLoading(false);}
+  },[ticker,apiKey]);
+  const pick=t=>{setTicker(t);analyse(t);};
+
+  return (
+    <div style={{padding:"28px 0"}}>
+      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Valuation</h2>
+      <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:24}}>See a stock's valuation multiples against its industry and its own history — and exactly what would have to happen for it to reach a fairer value.</p>
+      <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
+        <input placeholder="e.g. NVDA" value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&analyse()} maxLength={10}
+          style={{width:130,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
+        <StarToggle ticker={ticker}/>
+        <button onClick={analyse} disabled={loading||!ticker.trim()}
+          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!ticker.trim()?"not-allowed":"pointer",opacity:loading||!ticker.trim()?.5:1}}>
+          {loading?"…":"Check Valuation"}
+        </button>
+      </div>
+      <Chips items={EXAMPLE_TICKERS} onClick={t=>setTicker(t)} style={{marginBottom:16}}/>
+      <WatchlistBar onPick={pick}/>
+      {loading&&!result&&<Loader label="Pulling valuation multiples and peer data…"/>}
+      {error&&<div style={{background:"#1e1010",border:"1px solid #4a1e1e",borderRadius:"var(--radius-sm)",color:"var(--danger)",padding:"14px 16px",fontSize:13}}>⚠️ {error}</div>}
+      {result&&<>{ts&&<CachedBanner timestamp={ts} onClear={clearCache}/>}{loading&&<StreamNote/>}<ParsedResult text={result} sources={sources}/></>}
+    </div>
+  );
+}
+
 // ─── APP ──────────────────────────────────────────────────────────────────────
 const NAV=[
   {id:"movers",  label:"Why Did It Move?", icon:"📈"},
   {id:"research",label:"Company Research",  icon:"🔍"},
+  {id:"valuation",label:"Valuation",        icon:"🏷️"},
   {id:"compare", label:"Compare Stocks",    icon:"⚖️"},
   {id:"chain",   label:"Industry Chain",    icon:"🔗"},
   {id:"panel",   label:"Analyst Panel",     icon:"👥"},
@@ -1323,6 +1381,7 @@ function App() {
       {/* Panels */}
       {tab==="movers"   && <MoverPanel   apiKey={apiKey}/>}
       {tab==="research" && <ResearchPanel apiKey={apiKey}/>}
+      {tab==="valuation"&& <ValuationPanel apiKey={apiKey}/>}
       {tab==="compare"  && <ComparePanel  apiKey={apiKey}/>}
       {tab==="chain"    && <ChainPanel    apiKey={apiKey}/>}
       {tab==="panel"    && <PanelTab      apiKey={apiKey}/>}
