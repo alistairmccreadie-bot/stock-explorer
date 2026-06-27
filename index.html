@@ -1153,6 +1153,11 @@ function panelSys(mode) {
     "Each analyst below has a distinct, consistent investing style. Stay fully in character for each — let them genuinely disagree where their styles differ.",
     "Be specific: use real tickers and real, recent figures (search the web). Explain any jargon in plain English. This is educational, NOT financial advice.",
     "",
+    "VALUATION IS CENTRAL: every analyst must ground their view in valuation. For each stock, compare its current multiples (P/E, EV/EBITDA, P/S — whichever fit) to BOTH its industry/peers AND its own history. Then explicitly address the key dynamic:",
+    "- If it trades at a PREMIUM: can it grow into that multiple? Quantify roughly the earnings growth needed and judge how realistic that is, with the main risk if it doesn't.",
+    "- If it trades at a DISCOUNT: what would re-rate it toward the industry/market average, and what's the risk it stays cheap (value trap)?",
+    "Each analyst weighs this through their own lens (the value/GARP analysts are stricter on price paid; the growth bull will pay up when the runway justifies it; the quant cites the numbers).",
+    "",
     "THE PANEL (use these exact names as the section headings, in this order):",
     roster,
     "",
@@ -1161,12 +1166,13 @@ function panelSys(mode) {
     "TASK: The user gives an investment THESIS. Each analyst stress-tests it from their own style.",
     "Structure: one '## ' section per analyst (exact names above, in order), then the synthesis. In each analyst section use:",
     "**Verdict:** Agree / Partly agree / Disagree — then 2-4 sentences of reasoning in character, citing specific numbers.",
+    "*Valuation read:* one line on where it trades vs peers/history and whether it can grow into its multiple (or re-rate toward fair value), with the main risk.",
     "*What would change my mind:* one sentence.",
   ] : [
     "TASK: Each analyst proposes investment IDEAS in their own style, for the focus the user gives (or the broad market if none).",
     "Structure: one '## ' section per analyst (exact names above, in order), then the synthesis. In each analyst section write:",
-    "One sentence on what this analyst is hunting for, then a Markdown table with columns: | Ticker | Idea in one line | Why it fits this style |",
-    "Give 2-3 ideas, then one sentence on the main risk to those picks.",
+    "One sentence on what this analyst is hunting for, then a Markdown table with columns: | Ticker | Idea in one line | Valuation vs peers/history | Why it fits this style |",
+    "In the valuation column, note the key multiple vs peers/history and whether it can grow into it or re-rate. Give 2-3 ideas, then one sentence on the main risk to those picks.",
   ];
   const tail = [
     "",
