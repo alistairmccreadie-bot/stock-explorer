@@ -93,7 +93,7 @@ function friendlyError(status, err) {
   if (status===401) return (err && err.message) || "Access denied (401). Check the access password is correct.";
   if (status===429) return "Rate limit hit (429). Wait a moment and try again — or add more credit if your balance is low.";
   if (status===529) return "Anthropic's servers are overloaded right now (529). Please try again in a few seconds.";
-  if (status>=500) return "Anthropic had a server error ("+status+"). Please try again shortly.";
+  if (status>=500) return (err && err.message) || ("The server hit an error ("+status+"). Please try again shortly.");
   return msg;
 }
 
