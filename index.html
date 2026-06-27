@@ -45,6 +45,7 @@ const STORAGE_KEYS = {
   compare:   "sx_last_compare",
   chain:     "sx_last_chain",
   chainLib:  "sx_chain_library",
+  panel:     "sx_last_panel",
   watchlist: "sx_watchlist",
 };
 
@@ -1136,12 +1137,136 @@ function ChainPanel({ apiKey }) {
   );
 }
 
+// ─── PANEL: Analyst Panel ─────────────────────────────────────────────────────
+const PANEL = [
+  { name:"🏛️ The Value Investor",  style:"a disciplined value investor in the spirit of Warren Buffett and Ben Graham. You prize durable competitive moats, predictable owner earnings, strong balance sheets, capable and honest management, and a clear margin of safety versus intrinsic value. You are wary of hype, rich multiples, and businesses you can't understand." },
+  { name:"🚀 The Tech Growth Bull", style:"a technology growth investor in the spirit of Dan Ives. You focus on large secular themes (AI, cloud, cybersecurity, EVs), expanding total addressable markets, platform shifts, and category leaders. You will tolerate a high multiple when the growth runway and competitive position justify it, and you weigh narrative and momentum." },
+  { name:"📊 The Quant",            style:"a dispassionate quantitative analyst. You reason in factors and hard data — valuation multiples, quality (ROIC, margins), momentum, growth, balance-sheet strength, and statistical signals. You avoid narrative, cite concrete numbers, and openly flag where the data is thin or noisy." },
+  { name:"⚖️ The GARP Investor",    style:"a growth-at-a-reasonable-price investor. You hunt for solid, durable growth that isn't overpriced — a reasonable PEG, sustainable earnings growth, sensible valuations. You sit between the deep-value and high-growth camps and dislike overpaying for growth." },
+];
+
+function panelSys(mode) {
+  const roster = PANEL.map(a=>"- "+a.name+": "+a.style).join("\n");
+  const head = [
+    "You are the moderator of a panel of investment analysts helping an 18-year-old learn to invest.",
+    "Each analyst below has a distinct, consistent investing style. Stay fully in character for each — let them genuinely disagree where their styles differ.",
+    "Be specific: use real tickers and real, recent figures (search the web). Explain any jargon in plain English. This is educational, NOT financial advice.",
+    "",
+    "THE PANEL (use these exact names as the section headings, in this order):",
+    roster,
+    "",
+  ];
+  const body = mode==="thesis" ? [
+    "TASK: The user gives an investment THESIS. Each analyst stress-tests it from their own style.",
+    "Structure: one '## ' section per analyst (exact names above, in order), then the synthesis. In each analyst section use:",
+    "**Verdict:** Agree / Partly agree / Disagree — then 2-4 sentences of reasoning in character, citing specific numbers.",
+    "*What would change my mind:* one sentence.",
+  ] : [
+    "TASK: Each analyst proposes investment IDEAS in their own style, for the focus the user gives (or the broad market if none).",
+    "Structure: one '## ' section per analyst (exact names above, in order), then the synthesis. In each analyst section write:",
+    "One sentence on what this analyst is hunting for, then a Markdown table with columns: | Ticker | Idea in one line | Why it fits this style |",
+    "Give 2-3 ideas, then one sentence on the main risk to those picks.",
+  ];
+  const tail = [
+    "",
+    "## 🧑‍⚖️ Panel Chair — Synthesis",
+    "A short, balanced wrap-up with three bold-labelled parts: **Consensus** (where the analysts agree), **Key disagreements** (the main tensions between them), and **Bottom line** (a measured 1-2 sentence takeaway).",
+    "",
+    "FORMATTING RULES:",
+    "- Output ONLY the sections described, each starting with '## ', in order. Write nothing before the first heading or after the last.",
+    "- Keep each analyst to a few sentences or a small table — balanced, not bloated.",
+    "- Put picks and figures in Markdown tables. Write \"n/a\" instead of guessing a missing number.",
+  ];
+  return head.concat(body, tail).join("\n");
+}
+
+function PanelTab({ apiKey }) {
+  const saved=LS.get(STORAGE_KEYS.panel);
+  const [mode,setMode]       = useState(saved?.mode||"ideas");
+  const [focus,setFocus]     = useState(saved?.focus||"");
+  const [thesis,setThesis]   = useState(saved?.thesis||"");
+  const [result,setResult]   = useState(saved?.result||null);
+  const [sources,setSources] = useState(saved?.sources||null);
+  const [ts,setTs]           = useState(saved?.ts||null);
+  const [loading,setLoading] = useState(false);
+  const [error,setError]     = useState(null);
+  const clearCache=()=>{setResult(null);setSources(null);setTs(null);LS.del(STORAGE_KEYS.panel);};
+  const switchMode=m=>{ if(m===mode)return; setMode(m); setResult(null);setSources(null);setTs(null);setError(null); };
+
+  const run=useCallback(async()=>{
+    if(mode==="thesis" ? !thesis.trim() : false) return;
+    setLoading(true);setError(null);setResult(null);setSources(null);setTs(null);
+    try{
+      const sys=panelSys(mode);
+      const usr = mode==="thesis"
+        ? "Convene the panel to stress-test this investment thesis:\n\""+thesis.trim()+"\"\nFollow the required format exactly."
+        : "Convene the panel to generate investment ideas. "+(focus.trim()?("Focus area: "+focus.trim()+"."):"No specific focus — consider the broad global market.")+" Follow the required format exactly.";
+      const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult);
+      const now=Date.now();setResult(text);setSources(src);setTs(now);
+      LS.set(STORAGE_KEYS.panel,{mode,focus,thesis,result:text,sources:src,ts:now});
+    }catch(e){setError(e.message);}finally{setLoading(false);}
+  },[mode,focus,thesis,apiKey]);
+
+  const tabBtn=(m,label)=>(
+    <button onClick={()=>switchMode(m)}
+      style={{padding:"8px 16px",borderRadius:8,border:"1px solid "+(mode===m?"var(--accent)":"var(--border)"),background:mode===m?"var(--surface2)":"none",color:mode===m?"var(--accent)":"var(--text-muted)",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:"pointer"}}>
+      {label}
+    </button>
+  );
+  const canRun = !loading && (mode==="ideas" || thesis.trim());
+
+  return (
+    <div style={{padding:"28px 0"}}>
+      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Analyst Panel</h2>
+      <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:16}}>Four analysts with different styles — value, tech growth, quant, and growth-at-a-reasonable-price — generate ideas or stress-test your thesis, then a Panel Chair sums up.</p>
+
+      <div style={{display:"flex",gap:8,marginBottom:18}}>
+        {tabBtn("ideas","💡 Generate Ideas")}
+        {tabBtn("thesis","🔬 Test a Thesis")}
+      </div>
+
+      {mode==="ideas" ? (
+        <>
+          <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
+            <input placeholder="Focus (optional) — e.g. AI infrastructure, ASX dividend payers"
+              value={focus} onChange={e=>setFocus(e.target.value)} onKeyDown={e=>e.key==="Enter"&&run()}
+              style={{flex:1,minWidth:260,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none"}}/>
+            <button onClick={run} disabled={!canRun}
+              style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:canRun?"pointer":"not-allowed",opacity:canRun?1:.5}}>
+              {loading?"…":"Convene Panel"}
+            </button>
+          </div>
+          <Chips items={["AI infrastructure","ASX dividend stocks","Cybersecurity","Electric vehicles","Beaten-down quality names"]} label="Try:" onClick={v=>setFocus(v)} style={{marginBottom:24}}/>
+        </>
+      ) : (
+        <>
+          <textarea placeholder={"Enter an investment thesis to stress-test — e.g.\n\"Nvidia is still undervalued because data-centre demand will keep compounding for years.\""}
+            value={thesis} onChange={e=>setThesis(e.target.value)} rows={3}
+            style={{width:"100%",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",resize:"vertical",lineHeight:1.5,marginBottom:12}}/>
+          <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:24}}>
+            <button onClick={run} disabled={!canRun}
+              style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:canRun?"pointer":"not-allowed",opacity:canRun?1:.5}}>
+              {loading?"…":"Convene Panel"}
+            </button>
+            <Chips items={["Apple is now a services company, not a hardware company","Lithium miners are a value trap","Cybersecurity is the most durable software theme"]} label="Examples:" onClick={v=>setThesis(v)} style={{marginBottom:0}}/>
+          </div>
+        </>
+      )}
+
+      {loading&&!result&&<Loader label="Convening the panel…"/>}
+      {error&&<div style={{background:"#1e1010",border:"1px solid #4a1e1e",borderRadius:"var(--radius-sm)",color:"var(--danger)",padding:"14px 16px",fontSize:13}}>⚠️ {error}</div>}
+      {result&&<>{ts&&<CachedBanner timestamp={ts} onClear={clearCache}/>}{loading&&<StreamNote/>}<ParsedResult text={result} sources={sources}/></>}
+    </div>
+  );
+}
+
 // ─── APP ──────────────────────────────────────────────────────────────────────
 const NAV=[
   {id:"movers",  label:"Why Did It Move?", icon:"📈"},
   {id:"research",label:"Company Research",  icon:"🔍"},
   {id:"compare", label:"Compare Stocks",    icon:"⚖️"},
   {id:"chain",   label:"Industry Chain",    icon:"🔗"},
+  {id:"panel",   label:"Analyst Panel",     icon:"👥"},
 ];
 
 function App() {
@@ -1200,6 +1325,7 @@ function App() {
       {tab==="research" && <ResearchPanel apiKey={apiKey}/>}
       {tab==="compare"  && <ComparePanel  apiKey={apiKey}/>}
       {tab==="chain"    && <ChainPanel    apiKey={apiKey}/>}
+      {tab==="panel"    && <PanelTab      apiKey={apiKey}/>}
 
       {/* Disclaimer */}
       <div style={{marginTop:40,padding:"14px 18px",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",fontSize:12,color:"var(--text-dim)",lineHeight:1.5}}>
