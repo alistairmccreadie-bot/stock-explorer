@@ -1323,6 +1323,312 @@ function ValuationPanel({ apiKey }) {
   );
 }
 
+// ─── PANEL: Glossary ──────────────────────────────────────────────────────────
+const GLOSSARY_CATS = ["Valuation multiples","Profitability & margins","Growth & returns","Quality & concepts"];
+const GLOSSARY_DETAIL = [
+  { cat:"Valuation multiples", term:"Price-to-Earnings (P/E)", short:"Share price ÷ earnings per share — what you pay for $1 of profit.", body:
+`**What it is**
+The share price divided by earnings per share (EPS). At $100 with $2 of EPS, the P/E is 50 — you are paying $50 for every $1 of current annual profit.
+
+**How to read it**
+A P/E is really a statement about expectations. A low P/E (say 8–12) usually means the market expects little growth or sees risk; a high P/E (40, 70+) means it is pricing in years of rapid earnings growth. The number only means something relative to the company's growth, its industry, and its own history — 25x is cheap for a fast grower and expensive for a utility.
+
+**Worked example — what a 70x P/E really demands**
+A stock trades at $100 with EPS of $1.43, so P/E = 70. The market is implying earnings grow fast for years. Suppose EPS then grows 30% a year for 5 years, reaching about $5.30 (roughly 3.7x today's level). What happens to the price depends on the multiple the market awards by then:
+| In 5 years the market awards… | Price (EPS $5.30) | Your 5-year return |
+| --- | --- | --- |
+| Still 70x (premium holds) | $371 | +271% |
+| 40x (partly normalises) | $212 | +112% |
+| 25x (mature multiple) | $133 | +33% |
+Look at the last row: earnings grew 3.7x, yet the price rose only 33%, because the multiple compressed from 70x to 25x. This is the heart of the matter — simply meeting lofty expectations can leave the price nearly flat, because that growth was already paid for. The stock "grows into its multiple": earnings climb while the P/E drifts down toward normal. You make strong money only if growth beats expectations, or the premium multiple lasts longer than feared.
+
+**Watch out for**
+If the company misses, you get hit twice — lower earnings AND a falling multiple — which is why expensive stocks drop hard on bad news. P/E is meaningless for loss-making firms (no E) and is distorted by one-off gains or charges, so check the earnings are "clean".` },
+
+  { cat:"Valuation multiples", term:"Forward P/E", short:"P/E using next year's expected earnings instead of past earnings.", body:
+`**What it is**
+The same as P/E, but using analysts' expected EPS for the next 12 months instead of the last 12 months.
+
+**How to read it**
+For a growing company the forward P/E is lower than the trailing P/E, because future earnings are higher. It tells you what you are paying relative to where profits are heading — but it is only as reliable as the forecast.
+
+**Worked example**
+A stock at $100 has trailing EPS of $2 (P/E 50) but is expected to earn $4 next year. Its forward P/E is 25 — far less alarming once you account for the expected growth.
+
+**Watch out for**
+Forecasts are often too optimistic. If estimates get cut, today's "cheap" forward P/E quietly becomes expensive.` },
+
+  { cat:"Valuation multiples", term:"PEG Ratio", short:"P/E divided by the growth rate — a price tag on growth.", body:
+`**What it is**
+The P/E divided by the earnings growth rate (in %). It puts a price on growth: a PEG of 1.0 means you are paying about 1x the growth rate.
+
+**How to read it**
+Rough rule: a PEG below ~1 is reasonably priced for the growth, above ~2 is getting expensive. It is how a growth-at-a-reasonable-price (GARP) investor decides whether a high P/E is actually justified.
+
+**Worked example**
+Two stocks both trade at a P/E of 40. Company A grows EPS 40% a year → PEG 1.0 (fair). Company B grows 10% a year → PEG 4.0 (expensive). Same multiple, very different value.
+
+**Watch out for**
+Growth rates are estimates and rarely steady. PEG is meaningless for slow- or no-growth firms, and it flatters companies enjoying a short, unsustainable burst of growth.` },
+
+  { cat:"Valuation multiples", term:"Price-to-Sales (P/S)", short:"Market value ÷ revenue — used when there's little or no profit yet.", body:
+`**What it is**
+Market value divided by annual revenue (or price ÷ sales per share). Used when a company has little or no profit, so P/E doesn't exist.
+
+**How to read it**
+Handy for fast-growing, not-yet-profitable companies. But sales are not profits — a high P/S is only justified if the company can eventually turn that revenue into strong margins.
+
+**Worked example**
+A software firm at 20x sales is implying both rapid growth and high future margins. If it grows revenue 5x but margins disappoint, the P/S can collapse even as sales keep rising.
+
+**Watch out for**
+Only compare P/S within similar business models — a 90%-margin software company deserves a far higher P/S than a 5%-margin retailer.` },
+
+  { cat:"Valuation multiples", term:"EV/EBITDA", short:"Enterprise value ÷ EBITDA — values the whole business, debt included.", body:
+`**What it is**
+Enterprise value (market cap + debt − cash) divided by EBITDA. A way to value the whole business that is neutral to how it is financed.
+
+**How to read it**
+Because it includes debt and strips out financing and accounting choices, it is good for comparing companies with different debt loads and across countries. Lower is cheaper — but, as always, only versus peers and history.
+
+**Worked example**
+Two firms both trade at a P/E of 15, but one is debt-free and the other heavily borrowed. On EV/EBITDA the indebted one looks more expensive — EV/EBITDA surfaces the debt that P/E hides.
+
+**Watch out for**
+EBITDA ignores real costs (interest, tax, and the capital needed to replace equipment), so it flatters capital-heavy businesses. "EBITDA is not cash flow."` },
+
+  { cat:"Valuation multiples", term:"Price-to-Book (P/B)", short:"Share price ÷ net assets per share — best for asset-heavy firms.", body:
+`**What it is**
+Share price divided by book value (net assets) per share.
+
+**How to read it**
+Most meaningful for asset-heavy businesses (banks, insurers, industrials). A P/B under 1 can signal a bargain — or that the market thinks the assets are worth less than the books claim.
+
+**Worked example**
+A bank at 0.8x book may be cheap if its loans are sound, or fairly priced if bad debts are looming. P/B is nearly useless for asset-light firms (software, brands) whose value isn't on the balance sheet.
+
+**Watch out for**
+Book value reflects accounting, not market reality; buybacks and intangibles can distort it badly.` },
+
+  { cat:"Valuation multiples", term:"Dividend Yield", short:"Annual dividend ÷ price — the income return from holding the stock.", body:
+`**What it is**
+Annual dividends per share divided by the share price, as a %. The income you earn from holding the stock.
+
+**How to read it**
+A higher yield means more income, but an unusually high yield (say 8%+) is often a warning that the market expects the dividend to be cut. Always check it is covered by earnings or free cash flow (the payout ratio).
+
+**Worked example**
+A $50 stock paying $2 a year yields 4%. If the price falls to $25 on bad news, the yield "rises" to 8% — but that is a red flag, not a bargain, if profits can't sustain the payout.
+
+**Watch out for**
+A dividend can be cut overnight. Total return = yield + capital growth, so don't chase yield alone.` },
+
+  { cat:"Valuation multiples", term:"Multiple Expansion & Contraction (Re-rating)", short:"A change in the multiple itself, separate from earnings — the engine behind P/E.", body:
+`**What it is**
+A change in the valuation multiple (e.g. P/E) the market is willing to pay, separate from any change in earnings. Expansion (re-rating) = the multiple rises; contraction (de-rating) = it falls.
+
+**How to read it**
+Your return comes from two engines: earnings growth and the change in the multiple. Because price = earnings × multiple, both matter — and they can pull in opposite directions.
+
+**Worked example**
+| | Earnings | × Multiple | = Price |
+| --- | --- | --- | --- |
+| Today | $2 | 25x | $50 |
+| Earnings +50%, multiple flat | $3 | 25x | $75 (+50%) |
+| Earnings flat, re-rates to 35x | $2 | 35x | $70 (+40%) |
+| Earnings +50% but de-rates to 15x | $3 | 15x | $45 (−10%) |
+The last row is the trap: the business did well, yet the stock fell because the multiple dropped more than earnings rose. A cheap stock "works" when it both grows earnings and re-rates up toward its peers; a pricey stock can fall even while growing if it de-rates.
+
+**Watch out for**
+Multiple expansion is the least reliable engine — it depends on sentiment and interest rates. Durable returns come mostly from growth in earnings and cash.` },
+
+  { cat:"Profitability & margins", term:"Gross Margin", short:"(Revenue − cost of goods) ÷ revenue — the product's raw profitability.", body:
+`**What it is**
+(Revenue − cost of goods sold) ÷ revenue. The raw profitability of the product itself, before running costs.
+
+**How to read it**
+High, stable gross margins (software 70–90%, luxury goods high) signal pricing power and a possible moat; thin gross margins (supermarkets, airlines) leave little room for error. A rising gross margin is a strong positive signal.
+
+**Worked example**
+A company with an 80% gross margin keeps $0.80 of every sales dollar to cover everything else and still profit; a 20%-margin business keeps just $0.20 and must rely on huge volume.
+
+**Watch out for**
+Compare only within an industry. A falling gross margin can be an early warning of competition or rising input costs.` },
+
+  { cat:"Profitability & margins", term:"Operating Margin", short:"Operating profit ÷ revenue — profit from the core business.", body:
+`**What it is**
+Operating profit ÷ revenue — profit from the core business after running costs (R&D, marketing, admin) but before interest and tax.
+
+**How to read it**
+The cleanest read on how profitable the actual operations are. Expanding operating margin as a company grows ("operating leverage") is a powerful driver of earnings.
+
+**Worked example**
+If revenue grows 20% but costs grow only 10%, operating margin expands and profit jumps more than 20%. That leverage is why scaling software businesses can become so profitable.
+
+**Watch out for**
+One-off items can distort it. Check whether margin gains are durable or come from cost-cutting that can't repeat.` },
+
+  { cat:"Profitability & margins", term:"Net Margin", short:"Net profit ÷ revenue — what's left after everything.", body:
+`**What it is**
+Net profit ÷ revenue — what is finally left after all costs, interest and tax.
+
+**How to read it**
+The bottom-line profitability. Useful, but the most "polluted" margin (affected by tax, financing and one-offs), so always pair it with gross and operating margin.
+
+**Worked example**
+Two companies with the same operating margin can show very different net margins if one carries heavy debt interest or a higher tax rate.
+
+**Watch out for**
+A single good or bad quarter (an asset sale, a write-down) can swing net margin. Look at the trend, not one number.` },
+
+  { cat:"Profitability & margins", term:"EBITDA", short:"Earnings before interest, tax, depreciation & amortisation.", body:
+`**What it is**
+Earnings before interest, tax, depreciation and amortisation — a rough proxy for the cash a business's operations generate.
+
+**How to read it**
+It strips out financing and accounting choices to compare core profitability, and underpins valuation (EV/EBITDA) and debt covenants.
+
+**Worked example**
+A capital-heavy telco can show strong EBITDA but weak net profit once the huge depreciation of its network is counted — EBITDA flatters it.
+
+**Watch out for**
+It deliberately ignores real costs (the capex to replace assets, plus interest and tax). Treat very high "adjusted EBITDA" with suspicion.` },
+
+  { cat:"Growth & returns", term:"Earnings Per Share (EPS)", short:"Net profit ÷ number of shares — each share's slice of profit.", body:
+`**What it is**
+Net profit divided by the number of shares — the slice of profit attributable to each share.
+
+**How to read it**
+It is the "E" in P/E and the headline number markets react to each quarter. Growing EPS drives share prices over time. Watch diluted EPS, which counts options and convertibles.
+
+**Worked example**
+A company can grow EPS even with flat profit by buying back shares (fewer shares = a bigger slice each). So check whether EPS growth comes from real profit growth or from financial engineering.
+
+**Watch out for**
+Share issuance (dilution) quietly shrinks each holder's slice, and one-off items distort EPS.` },
+
+  { cat:"Growth & returns", term:"Revenue Growth & CAGR", short:"How fast sales grow; CAGR is the smoothed yearly rate.", body:
+`**What it is**
+How fast sales are increasing. CAGR (compound annual growth rate) is the smoothed yearly rate over several years.
+
+**How to read it**
+The top line everything else is built on. Durable, high revenue growth is what justifies high multiples — but it must eventually convert into profit and cash.
+
+**Worked example**
+Revenue rising from $100m to $200m over 4 years is a CAGR of about 19% (not 25%), because growth compounds. CAGR lets you compare growth fairly across different time spans.
+
+**Watch out for**
+Separate organic growth from growth bought through acquisitions. Fast revenue growth that never reaches profitability can destroy value.` },
+
+  { cat:"Growth & returns", term:"Return on Equity & ROIC", short:"How efficiently a company turns capital into profit.", body:
+`**What it is**
+ROE = profit ÷ shareholders' equity. ROIC = after-tax operating profit ÷ all capital (debt + equity). Both measure how efficiently a company turns capital into profit.
+
+**How to read it**
+High, sustained ROIC — well above the company's cost of capital — is one of the best signs of a quality business with a moat. ROIC is harder to game than ROE.
+
+**Worked example**
+A company earning 20% ROIC compounds value far faster than one earning 6%. Buffett-style investors prize high, durable ROIC above almost everything else.
+
+**Watch out for**
+ROE can be inflated by debt — leverage boosts ROE while adding risk — which is why ROIC is often the better lens.` },
+
+  { cat:"Growth & returns", term:"Free Cash Flow (FCF)", short:"Operating cash minus capex — the real cash a business throws off.", body:
+`**What it is**
+Cash from operations minus capital spending — the actual cash a business generates and can use to pay dividends, buy back shares, cut debt, or reinvest.
+
+**How to read it**
+Often more honest than accounting profit ("earnings are an opinion, cash is a fact"). FCF yield (FCF ÷ market cap) is a clean valuation check.
+
+**Worked example**
+A company can report rising profits while FCF is negative if it is burning cash on inventory or capex — a warning that profits aren't turning into real money.
+
+**Watch out for**
+FCF is lumpy (a big factory year depresses it), so judge it over several years, and check whether the capex is for growth or just maintenance.` },
+
+  { cat:"Quality & concepts", term:"Economic Moat", short:"A durable advantage that protects profits from competitors.", body:
+`**What it is**
+A durable competitive advantage that protects a company's profits from rivals — brands, network effects, switching costs, scale, patents, or regulation.
+
+**How to read it**
+Moats are why high returns and margins persist instead of being competed away. The wider the moat, the longer a company can compound — and the more a premium valuation can be justified.
+
+**Worked example**
+A network-effects business (more users → more value → more users), like a dominant marketplace, is very hard to displace. That durability is what lets it sustain a high multiple for years.
+
+**Watch out for**
+Moats erode — through technology shifts or regulation. The moat you assume is permanent is the most dangerous kind.` },
+
+  { cat:"Quality & concepts", term:"Total Addressable Market (TAM)", short:"The total revenue available if a product captured 100% of its market.", body:
+`**What it is**
+The total annual revenue available if a product captured 100% of its market.
+
+**How to read it**
+Growth investors use a big TAM to argue a long runway — a small share of a huge, growing market is the bull case for many tech names.
+
+**Worked example**
+A company with $1bn of revenue in a $200bn TAM has captured 0.5%. Bulls see room to grow 10x; bears ask whether it can actually win share profitably.
+
+**Watch out for**
+TAM figures are often inflated marketing numbers. What matters is the realistically winnable, profitable slice.` },
+
+  { cat:"Quality & concepts", term:"Market Capitalisation", short:"Share price × shares — the market value of the whole company.", body:
+`**What it is**
+Share price × shares outstanding — the total market value of a company's equity.
+
+**How to read it**
+It is the size of the company as the market sees it, and the basis for "small / mid / large cap". Use market cap, not share price, to judge how big a company is.
+
+**Worked example**
+1 billion shares at $50 = a $50bn market cap. A $5 stock can be worth far more than a $500 stock. To value the whole business including debt, use enterprise value (market cap + net debt).
+
+**Watch out for**
+A low share price isn't "cheap" and a high one isn't "expensive" — only the multiple tells you that.` },
+];
+
+function GlossaryTab() {
+  const [q,setQ]     = useState("");
+  const [open,setOpen] = useState(null);
+  const ql=q.trim().toLowerCase();
+  const match=e=> !ql || e.term.toLowerCase().includes(ql) || e.short.toLowerCase().includes(ql) || e.body.toLowerCase().includes(ql);
+  const anyMatch = GLOSSARY_DETAIL.some(match);
+
+  return (
+    <div style={{padding:"28px 0"}}>
+      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Glossary</h2>
+      <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:18}}>Plain-English deep-dives on the key terms used to analyse stocks and industries — what each means, how to read it, a worked example, and the traps to avoid.</p>
+      <input placeholder="Search terms… (e.g. PEG, margin, moat)" value={q} onChange={e=>setQ(e.target.value)}
+        style={{width:"100%",maxWidth:360,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",marginBottom:8}}/>
+      {GLOSSARY_CATS.map(cat=>{
+        const items=GLOSSARY_DETAIL.filter(e=>e.cat===cat&&match(e));
+        if(!items.length) return null;
+        return (
+          <div key={cat} style={{marginTop:22}}>
+            <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"var(--accent3)",marginBottom:10}}>{cat}</div>
+            {items.map(e=>{
+              const isOpen=open===e.term;
+              return (
+                <div key={e.term} style={{marginBottom:8}}>
+                  <button onClick={()=>setOpen(isOpen?null:e.term)}
+                    style={{width:"100%",display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,textAlign:"left",background:"var(--surface)",border:"1px solid "+(isOpen?"var(--accent)":"var(--border)"),borderRadius:"var(--radius-sm)",padding:"12px 16px",cursor:"pointer",fontFamily:"Inter,sans-serif"}}>
+                    <span style={{fontSize:14,color:"var(--text)"}}>
+                      <strong style={{fontFamily:"Space Grotesk,sans-serif",fontWeight:700}}>{e.term}</strong>
+                      <span style={{color:"var(--text-muted)"}}> — {e.short}</span>
+                    </span>
+                    <span style={{color:"var(--accent)",fontSize:18,lineHeight:1,flexShrink:0}}>{isOpen?"−":"+"}</span>
+                  </button>
+                  {isOpen&&<ParsedResult text={e.body}/>}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+      {!anyMatch&&<p style={{fontSize:13,color:"var(--text-dim)",marginTop:20}}>No terms match "{q}".</p>}
+    </div>
+  );
+}
+
 // ─── APP ──────────────────────────────────────────────────────────────────────
 const NAV=[
   {id:"movers",  label:"Why Did It Move?", icon:"📈"},
@@ -1331,6 +1637,7 @@ const NAV=[
   {id:"compare", label:"Compare Stocks",    icon:"⚖️"},
   {id:"chain",   label:"Industry Chain",    icon:"🔗"},
   {id:"panel",   label:"Analyst Panel",     icon:"👥"},
+  {id:"glossary",label:"Glossary",          icon:"📖"},
 ];
 
 function App() {
@@ -1391,6 +1698,7 @@ function App() {
       {tab==="compare"  && <ComparePanel  apiKey={apiKey}/>}
       {tab==="chain"    && <ChainPanel    apiKey={apiKey}/>}
       {tab==="panel"    && <PanelTab      apiKey={apiKey}/>}
+      {tab==="glossary" && <GlossaryTab/>}
 
       {/* Disclaimer */}
       <div style={{marginTop:40,padding:"14px 18px",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",fontSize:12,color:"var(--text-dim)",lineHeight:1.5}}>
