@@ -1350,7 +1350,7 @@ function ValuationPanel({ apiKey }) {
 }
 
 // ─── PANEL: Glossary ──────────────────────────────────────────────────────────
-const GLOSSARY_CATS = ["Valuation multiples","Profitability & margins","Growth & returns","Quality & concepts"];
+const GLOSSARY_CATS = ["Valuation multiples","Profitability & margins","Growth & returns","Quality & concepts","Trading Strategies"];
 const GLOSSARY_DETAIL = [
   { cat:"Valuation multiples", term:"Price-to-Earnings (P/E)", short:"Share price ÷ earnings per share — what you pay for $1 of profit.", body:
 `**What it is**
@@ -1610,6 +1610,162 @@ It is the size of the company as the market sees it, and the basis for "small / 
 
 **Watch out for**
 A low share price isn't "cheap" and a high one isn't "expensive" — only the multiple tells you that.` },
+
+  { cat:"Trading Strategies", term:"Buy and Hold", short:"Buy quality and hold for years, ignoring short-term noise.", body:
+`**What it is**
+Buying shares (usually in quality businesses or broad funds) and holding them for years, ignoring short-term price swings.
+
+**How it works**
+You let compounding and earnings growth do the work, and avoid the costs and mistakes of frequent trading. Time in the market beats timing the market.
+
+**Worked example**
+A $10,000 investment compounding at 8% a year becomes about $21,600 over 10 years if simply left alone — no trading needed.
+
+**Watch out for**
+"Hold" doesn't mean "ignore" — a business whose fundamentals break down should still be sold. Buy-and-hold rewards quality, not blind loyalty.` },
+
+  { cat:"Trading Strategies", term:"Dollar-Cost Averaging (DCA)", short:"Invest a fixed amount on a schedule, regardless of price.", body:
+`**What it is**
+Investing a fixed amount at regular intervals (say monthly), no matter what the price is doing.
+
+**How it works**
+You automatically buy more shares when prices are low and fewer when high, smoothing your average cost and removing the temptation to time the market.
+
+**Worked example**
+Investing $300/month: at $30 you buy 10 shares, at $20 you buy 15. Your average cost ends up below the simple average price because more was bought cheaply.
+
+**Watch out for**
+In a steadily rising market, investing a lump sum early often beats DCA. DCA's real value is discipline and managing the emotional risk of buying at a peak.` },
+
+  { cat:"Trading Strategies", term:"Index (Passive) Investing", short:"Own the whole market cheaply via an index fund or ETF.", body:
+`**What it is**
+Buying a low-cost fund that simply tracks a market index (e.g. the S&P 500 or ASX 200) rather than picking individual stocks.
+
+**How it works**
+You get instant diversification at very low fees, and you match the market's return — which, after costs, beats most active managers over the long run.
+
+**Worked example**
+A fund charging 0.05% vs an active fund at 1.0%: on $100,000 over 30 years, the fee gap alone can cost tens of thousands in lost compounding.
+
+**Watch out for**
+You will never beat the market (by design), and you ride it all the way down in a crash. Diversification reduces single-stock risk, not market risk.` },
+
+  { cat:"Trading Strategies", term:"Value Investing", short:"Buy solid businesses for less than they're worth.", body:
+`**What it is**
+Buying shares that trade below your estimate of their intrinsic value, with a "margin of safety". The Buffett/Graham school.
+
+**How it works**
+You look for sound businesses the market has mispriced — often unloved or out of fashion — and wait for the price to catch up to value.
+
+**Worked example**
+A company you judge worth $100/share trading at $65 offers a 35% margin of safety: room to be wrong and still do well if it re-rates toward fair value.
+
+**Watch out for**
+Cheap can stay cheap (a "value trap") if the business is in genuine decline. The discount must reflect mispricing, not a broken company.` },
+
+  { cat:"Trading Strategies", term:"Growth Investing", short:"Back fast-growing companies, accepting higher multiples.", body:
+`**What it is**
+Investing in companies growing revenue and earnings much faster than average, accepting a high valuation for the growth potential.
+
+**How it works**
+You bet that rapid compounding of the business will justify today's premium price and drive the shares much higher over time.
+
+**Worked example**
+A company growing earnings 30% a year roughly quadruples profit in 5 years — which can support a far higher share price even if its multiple cools.
+
+**Watch out for**
+High expectations mean a brutal fall if growth disappoints. Pair growth investing with the P/E and "growing into the multiple" ideas in this glossary.` },
+
+  { cat:"Trading Strategies", term:"Dividend (Income) Investing", short:"Build a stream of income from dividend-paying stocks.", body:
+`**What it is**
+Focusing on companies that pay reliable, ideally growing, dividends to generate a regular income stream.
+
+**How it works**
+You earn cash returns regardless of share-price moves, and reinvested dividends compound powerfully over time. Favoured by income-focused and retired investors.
+
+**Worked example**
+A $50 stock paying $2/year yields 4%. If it raises the dividend 6% a year, your income — and usually the share price — grows steadily alongside it.
+
+**Watch out for**
+A very high yield often signals a dividend at risk of being cut. Always check the payout is covered by earnings and free cash flow.` },
+
+  { cat:"Trading Strategies", term:"Momentum Investing", short:"Buy what's already rising; sell what's falling.", body:
+`**What it is**
+Buying stocks (or sectors) that have been going up and avoiding or selling those going down — riding the trend.
+
+**How it works**
+It exploits the tendency of price trends to persist for a while as more buyers pile in. It is rules-based and unsentimental.
+
+**Worked example**
+A simple momentum rule might hold the strongest-performing stocks of the past 6–12 months and rotate monthly into the new leaders.
+
+**Watch out for**
+Momentum reverses sharply and without warning, so losses can be sudden. It needs strict discipline and usually stop-losses.` },
+
+  { cat:"Trading Strategies", term:"Contrarian Investing", short:"Go against the crowd — buy fear, sell euphoria.", body:
+`**What it is**
+Deliberately doing the opposite of the prevailing crowd: buying when others are fearful and selling when others are greedy.
+
+**How it works**
+Markets often over-react, pushing good assets too cheap in panics and too expensive in manias. Contrarians profit from the eventual return to sense.
+
+**Worked example**
+Buying quality shares during a market panic — when headlines are worst — and selling into a euphoric bubble is the classic contrarian playbook.
+
+**Watch out for**
+The crowd is sometimes right, and "cheap" can get cheaper. Being early looks identical to being wrong for a painfully long time.` },
+
+  { cat:"Trading Strategies", term:"Swing Trading", short:"Hold for days to weeks to catch a price 'swing'.", body:
+`**What it is**
+Holding a position for a few days to a few weeks to capture a single move (a "swing") in the price, then exiting.
+
+**How it works**
+Traders use chart patterns, support/resistance and news catalysts to time entries and exits over the short term.
+
+**Worked example**
+Buying a stock at $50 expecting a bounce to $58 over two weeks, with a stop-loss at $47 to cap the downside.
+
+**Watch out for**
+It is active, time-consuming and racks up trading costs and tax events. Most short-term traders underperform a simple buy-and-hold approach.` },
+
+  { cat:"Trading Strategies", term:"Day Trading", short:"Buy and sell within the same day — high risk, high effort.", body:
+`**What it is**
+Opening and closing positions within the same trading day, never holding overnight, to profit from small intraday moves.
+
+**How it works**
+It relies on speed, leverage, tight risk control and constant screen time, often trading the same names repeatedly.
+
+**Worked example**
+Buying 1,000 shares at $20.10 and selling at $20.40 the same hour nets $300 before costs — then repeating, with losers cut fast.
+
+**Watch out for**
+The large majority of day traders lose money. Costs, leverage and emotion make it closer to a full-time job than an investment strategy.` },
+
+  { cat:"Trading Strategies", term:"Rebalancing", short:"Periodically reset your holdings back to target weights.", body:
+`**What it is**
+Periodically adjusting a portfolio back to its intended mix (e.g. 70% shares / 30% bonds) after market moves push it off target.
+
+**How it works**
+It quietly forces you to sell what has risen and buy what has lagged — locking in discipline and controlling risk without market-timing.
+
+**Worked example**
+If shares rally and your 70/30 split drifts to 80/20, you sell some shares and top up bonds to restore 70/30 — trimming risk after a run-up.
+
+**Watch out for**
+Rebalancing too often raises costs and taxes; once or twice a year (or on a set drift threshold) is usually enough.` },
+
+  { cat:"Trading Strategies", term:"Stop-Loss & Position Sizing", short:"Cap the loss on any one trade before you enter it.", body:
+`**What it is**
+Risk-control tools: a stop-loss automatically sells if the price falls to a set level, and position sizing limits how much you put into any single idea.
+
+**How it works**
+Together they cap the damage from any one mistake, so no single position can sink the portfolio. The first rule of trading is to survive.
+
+**Worked example**
+Risking only 1% of a $50,000 account ($500) per trade, with a stop 10% below entry, means each position is about $5,000 — losses stay small and recoverable.
+
+**Watch out for**
+Stops set too tight get triggered by normal volatility; in fast-falling markets a stop may fill well below its level (slippage).` },
 ];
 
 function GlossaryTab({ apiKey }) {
@@ -1651,14 +1807,21 @@ function GlossaryTab({ apiKey }) {
     setAskLoading(true);setAskError(null);setAskResult(null);
     setTimeout(()=>{ if(askRef.current) askRef.current.scrollIntoView({behavior:"smooth",block:"start"}); },60);
     try{
-      const sys="You are an investment educator writing ONE glossary entry for an 18-year-old learning to invest. Explain the term the user gives using EXACTLY these bold-labelled sections, each on its own line: **What it is**, **How to read it**, **Worked example** (use real illustrative numbers; a small Markdown table is good when it helps), **Watch out for**. Keep it balanced and plain-English; explain any jargon. If the term isn't a finance/investing concept, say so in one line instead.";
+      const sys="You are an investment educator writing ONE glossary entry for an 18-year-old learning to invest.\n"+
+        "FIRST output a single line exactly in the form: CATEGORY: X — where X is the ONE best-fit category from this list: "+GLOSSARY_CATS.join(" | ")+".\n"+
+        "THEN, on the following lines, explain the term using EXACTLY these bold-labelled sections, each on its own line: **What it is**, **How to read it**, **Worked example** (use real illustrative numbers; a small Markdown table is good when it helps), **Watch out for**.\n"+
+        "Keep it balanced and plain-English; explain any jargon. If the term isn't a finance/investing concept, still give the CATEGORY line (use Quality & concepts) then say in one line that it isn't a finance term.";
       const usr="Explain this investing term: "+t;
       const {text}=await callClaude(apiKey,sys,usr,1600,false);
-      setAskResult(text);
+      // Pull the CATEGORY line off the top and validate it against the known list.
+      let cat="Quality & concepts", body=text;
+      const m=text.match(/^\s*CATEGORY:\s*(.+)$/im);
+      if(m){ const found=GLOSSARY_CATS.find(c=>c.toLowerCase()===m[1].trim().toLowerCase()); if(found)cat=found; body=text.replace(m[0],"").replace(/^\s+/,""); }
+      setAskResult(body);
       // Add to the shared glossary library so it accumulates over time (skip already-curated terms).
       if(!isCurated(t)){
         try{
-          const es=await libraryWrite(apiKey,{action:"save",entry:{term:t,short:deriveShort(text),body:text,ts:Date.now()}},"/glossary");
+          const es=await libraryWrite(apiKey,{action:"save",entry:{term:t,cat,short:deriveShort(body),body,ts:Date.now()}},"/glossary");
           setSaved(es); LS.set(STORAGE_KEYS.glossaryLib,es);
         }catch(_){}
       }
@@ -1677,6 +1840,28 @@ function GlossaryTab({ apiKey }) {
     return ()=>window.removeEventListener("sx-open-glossary",consume);
   },[ask]);
 
+  const catOf=e=> (e.cat&&GLOSSARY_CATS.includes(e.cat))?e.cat:"Quality & concepts";
+  const renderEntry=(e,isSaved)=>{
+    const isOpen=open===e.term;
+    return (
+      <div key={(isSaved?"s-":"c-")+e.term} id={"gloss-"+gslug(e.term)} style={{marginBottom:8,scrollMarginTop:12}}>
+        <div onClick={()=>setOpen(isOpen?null:e.term)}
+          style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,background:"var(--surface)",border:"1px solid "+(isOpen?"var(--accent)":"var(--border)"),borderRadius:"var(--radius-sm)",padding:"12px 16px",cursor:"pointer"}}>
+          <span style={{fontSize:14,color:"var(--text)"}}>
+            <strong style={{fontFamily:"Space Grotesk,sans-serif",fontWeight:700}}>{e.term}</strong>
+            {e.short&&<span style={{color:"var(--text-muted)"}}> — {e.short}</span>}
+            {isSaved&&<span style={{marginLeft:8,fontSize:10,fontWeight:700,color:"var(--accent2)",border:"1px solid var(--border)",borderRadius:10,padding:"1px 6px",whiteSpace:"nowrap"}}>saved</span>}
+          </span>
+          <span style={{display:"inline-flex",alignItems:"center",gap:12,flexShrink:0}}>
+            {isSaved&&<button onClick={ev=>{ev.stopPropagation();removeSaved(e.term);}} title="Remove from library" style={{background:"none",border:"none",color:"var(--text-dim)",fontSize:15,lineHeight:1,cursor:"pointer",padding:0}}>×</button>}
+            <span style={{color:"var(--accent)",fontSize:18,lineHeight:1}}>{isOpen?"−":"+"}</span>
+          </span>
+        </div>
+        {isOpen&&<ParsedResult text={e.body}/>}
+      </div>
+    );
+  };
+
   return (
     <div style={{padding:"28px 0"}}>
       <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Glossary</h2>
@@ -1684,56 +1869,17 @@ function GlossaryTab({ apiKey }) {
       <input placeholder="Search terms… (e.g. PEG, margin, moat)" value={q} onChange={e=>setQ(e.target.value)}
         style={{width:"100%",maxWidth:360,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",marginBottom:8}}/>
       {GLOSSARY_CATS.map(cat=>{
-        const items=GLOSSARY_DETAIL.filter(e=>e.cat===cat&&match(e));
-        if(!items.length) return null;
+        const curatedItems=GLOSSARY_DETAIL.filter(e=>e.cat===cat&&match(e));
+        const savedItems=saved.filter(e=>catOf(e)===cat&&match(e));
+        if(!curatedItems.length&&!savedItems.length) return null;
         return (
           <div key={cat} style={{marginTop:22}}>
             <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"var(--accent3)",marginBottom:10}}>{cat}</div>
-            {items.map(e=>{
-              const isOpen=open===e.term;
-              return (
-                <div key={e.term} id={"gloss-"+gslug(e.term)} style={{marginBottom:8,scrollMarginTop:12}}>
-                  <button onClick={()=>setOpen(isOpen?null:e.term)}
-                    style={{width:"100%",display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,textAlign:"left",background:"var(--surface)",border:"1px solid "+(isOpen?"var(--accent)":"var(--border)"),borderRadius:"var(--radius-sm)",padding:"12px 16px",cursor:"pointer",fontFamily:"Inter,sans-serif"}}>
-                    <span style={{fontSize:14,color:"var(--text)"}}>
-                      <strong style={{fontFamily:"Space Grotesk,sans-serif",fontWeight:700}}>{e.term}</strong>
-                      <span style={{color:"var(--text-muted)"}}> — {e.short}</span>
-                    </span>
-                    <span style={{color:"var(--accent)",fontSize:18,lineHeight:1,flexShrink:0}}>{isOpen?"−":"+"}</span>
-                  </button>
-                  {isOpen&&<ParsedResult text={e.body}/>}
-                </div>
-              );
-            })}
+            {curatedItems.map(e=>renderEntry(e,false))}
+            {savedItems.map(e=>renderEntry(e,true))}
           </div>
         );
       })}
-      {/* Saved explanations — AI answers that accumulate into the shared library */}
-      {saved.filter(match).length>0&&(
-        <div style={{marginTop:22}}>
-          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"var(--accent3)",marginBottom:10}}>📚 Saved explanations</div>
-          {saved.filter(match).map(e=>{
-            const isOpen=open===e.term;
-            return (
-              <div key={e.term} id={"gloss-"+gslug(e.term)} style={{marginBottom:8,scrollMarginTop:12}}>
-                <div onClick={()=>setOpen(isOpen?null:e.term)}
-                  style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,background:"var(--surface)",border:"1px solid "+(isOpen?"var(--accent)":"var(--border)"),borderRadius:"var(--radius-sm)",padding:"12px 16px",cursor:"pointer"}}>
-                  <span style={{fontSize:14,color:"var(--text)"}}>
-                    <strong style={{fontFamily:"Space Grotesk,sans-serif",fontWeight:700}}>{e.term}</strong>
-                    {e.short&&<span style={{color:"var(--text-muted)"}}> — {e.short}</span>}
-                  </span>
-                  <span style={{display:"inline-flex",alignItems:"center",gap:12,flexShrink:0}}>
-                    <button onClick={ev=>{ev.stopPropagation();removeSaved(e.term);}} title="Remove from library"
-                      style={{background:"none",border:"none",color:"var(--text-dim)",fontSize:15,lineHeight:1,cursor:"pointer",padding:0}}>×</button>
-                    <span style={{color:"var(--accent)",fontSize:18,lineHeight:1}}>{isOpen?"−":"+"}</span>
-                  </span>
-                </div>
-                {isOpen&&<ParsedResult text={e.body}/>}
-              </div>
-            );
-          })}
-        </div>
-      )}
       {!anyMatch&&<p style={{fontSize:13,color:"var(--text-dim)",marginTop:20}}>No terms match "{q}" — try the "Explain another term" box below.</p>}
 
       {/* AI: explain any other term */}
