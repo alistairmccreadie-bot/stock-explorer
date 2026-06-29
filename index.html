@@ -367,8 +367,32 @@ const GLOSSARY = {
 const GLOSSARY_KEYS = Object.keys(GLOSSARY).sort((a,b)=>b.length-a.length);
 const GLOSSARY_RE = new RegExp("("+GLOSSARY_KEYS.map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|")+")","gi");
 
+// Map an inline hover term → the matching detailed Glossary entry (exact term string).
+const GLOSSARY_LINK = {
+  "p/e":"Price-to-Earnings (P/E)", "p/s":"Price-to-Sales (P/S)", "p/b":"Price-to-Book (P/B)",
+  "eps":"Earnings Per Share (EPS)", "ebitda":"EBITDA", "ev/ebitda":"EV/EBITDA",
+  "market cap":"Market Capitalisation", "free cash flow":"Free Cash Flow (FCF)", "cash flow":"Free Cash Flow (FCF)",
+  "gross margin":"Gross Margin", "operating margin":"Operating Margin", "net margin":"Net Margin",
+  "operating income":"Operating Margin", "moat":"Economic Moat", "dividend yield":"Dividend Yield",
+  "roe":"Return on Equity & ROIC", "roic":"Return on Equity & ROIC", "tam":"Total Addressable Market (TAM)",
+  "cagr":"Revenue Growth & CAGR",
+};
+const gslug = s => (s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
+
+// Jump to the Glossary tab and open a curated entry, or pre-fill the AI "explain" box.
+function openGlossaryEntry(nav) {
+  window.__sxGlossaryNav = nav;            // {curated} or {ask}
+  if (location.hash.replace("#","") !== "glossary") location.hash = "glossary";
+  window.dispatchEvent(new Event("sx-open-glossary"));
+}
+
 function GlossaryTerm({ term, def }) {
   const [open,setOpen] = useState(false);
+  const target = GLOSSARY_LINK[(term||"").toLowerCase()];
+  const learnMore = e => {
+    e.stopPropagation(); setOpen(false);
+    openGlossaryEntry(target ? { curated: target } : { ask: term });
+  };
   return (
     <span style={{position:"relative"}}>
       <span onClick={()=>setOpen(o=>!o)} style={{borderBottom:"1px dotted var(--accent2)",cursor:"help"}}>{term}</span>
@@ -376,6 +400,7 @@ function GlossaryTerm({ term, def }) {
         <span style={{position:"absolute",left:0,top:"100%",zIndex:30,marginTop:6,display:"block",width:250,background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 12px",fontSize:12,fontWeight:400,color:"var(--text)",lineHeight:1.5,boxShadow:"0 8px 24px rgba(0,0,0,.45)",whiteSpace:"normal",textTransform:"none",letterSpacing:"normal"}}>
           <strong style={{color:"var(--accent2)",display:"block",marginBottom:4,fontFamily:"Space Grotesk,sans-serif"}}>{term}</strong>
           {def}
+          <a onClick={learnMore} style={{display:"block",marginTop:8,color:"var(--accent)",cursor:"pointer",fontWeight:600}}>Learn more →</a>
           <span onClick={e=>{e.stopPropagation();setOpen(false);}} style={{position:"absolute",top:6,right:8,cursor:"pointer",color:"var(--text-dim)"}}>×</span>
         </span>
       )}
@@ -1586,12 +1611,44 @@ It is the size of the company as the market sees it, and the basis for "small / 
 A low share price isn't "cheap" and a high one isn't "expensive" — only the multiple tells you that.` },
 ];
 
-function GlossaryTab() {
+function GlossaryTab({ apiKey }) {
   const [q,setQ]     = useState("");
   const [open,setOpen] = useState(null);
+  const [askTerm,setAskTerm]     = useState("");
+  const [askResult,setAskResult] = useState(null);
+  const [askLoading,setAskLoading] = useState(false);
+  const [askError,setAskError]   = useState(null);
+  const askRef = useRef(null);
   const ql=q.trim().toLowerCase();
   const match=e=> !ql || e.term.toLowerCase().includes(ql) || e.short.toLowerCase().includes(ql) || e.body.toLowerCase().includes(ql);
   const anyMatch = GLOSSARY_DETAIL.some(match);
+
+  const openCurated=term=>{ setOpen(term); setTimeout(()=>{ const el=document.getElementById("gloss-"+gslug(term)); if(el) el.scrollIntoView({behavior:"smooth",block:"start"}); },60); };
+
+  const ask=useCallback(async(override)=>{
+    const t=((typeof override==="string"?override:askTerm)||"").trim();
+    if(!t)return;
+    setAskLoading(true);setAskError(null);setAskResult(null);
+    setTimeout(()=>{ if(askRef.current) askRef.current.scrollIntoView({behavior:"smooth",block:"start"}); },60);
+    try{
+      const sys="You are an investment educator writing ONE glossary entry for an 18-year-old learning to invest. Explain the term the user gives using EXACTLY these bold-labelled sections, each on its own line: **What it is**, **How to read it**, **Worked example** (use real illustrative numbers; a small Markdown table is good when it helps), **Watch out for**. Keep it balanced and plain-English; explain any jargon. If the term isn't a finance/investing concept, say so in one line instead.";
+      const usr="Explain this investing term: "+t;
+      const {text}=await callClaude(apiKey,sys,usr,1600,false);
+      setAskResult(text);
+    }catch(e){setAskError(e.message);}finally{setAskLoading(false);}
+  },[askTerm,apiKey]);
+
+  // Respond to "Learn more →" clicks from inline hover tooltips.
+  useEffect(()=>{
+    const consume=()=>{
+      const nav=window.__sxGlossaryNav; if(!nav) return; window.__sxGlossaryNav=null;
+      if(nav.curated) openCurated(nav.curated);
+      else if(nav.ask){ setAskTerm(nav.ask); ask(nav.ask); }
+    };
+    consume();
+    window.addEventListener("sx-open-glossary",consume);
+    return ()=>window.removeEventListener("sx-open-glossary",consume);
+  },[ask]);
 
   return (
     <div style={{padding:"28px 0"}}>
@@ -1608,7 +1665,7 @@ function GlossaryTab() {
             {items.map(e=>{
               const isOpen=open===e.term;
               return (
-                <div key={e.term} style={{marginBottom:8}}>
+                <div key={e.term} id={"gloss-"+gslug(e.term)} style={{marginBottom:8,scrollMarginTop:12}}>
                   <button onClick={()=>setOpen(isOpen?null:e.term)}
                     style={{width:"100%",display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,textAlign:"left",background:"var(--surface)",border:"1px solid "+(isOpen?"var(--accent)":"var(--border)"),borderRadius:"var(--radius-sm)",padding:"12px 16px",cursor:"pointer",fontFamily:"Inter,sans-serif"}}>
                     <span style={{fontSize:14,color:"var(--text)"}}>
@@ -1624,7 +1681,24 @@ function GlossaryTab() {
           </div>
         );
       })}
-      {!anyMatch&&<p style={{fontSize:13,color:"var(--text-dim)",marginTop:20}}>No terms match "{q}".</p>}
+      {!anyMatch&&<p style={{fontSize:13,color:"var(--text-dim)",marginTop:20}}>No curated terms match "{q}" — try the "Explain another term" box below.</p>}
+
+      {/* AI: explain any other term */}
+      <div ref={askRef} style={{marginTop:34,paddingTop:24,borderTop:"1px solid var(--border)",scrollMarginTop:12}}>
+        <h3 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:700,marginBottom:6}}>🤖 Explain another term</h3>
+        <p style={{fontSize:13,color:"var(--text-muted)",marginBottom:14}}>Not in the list above? Type any investing term or concept and get a full explanation in the same style.</p>
+        <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+          <input placeholder="e.g. short selling, beta, working capital" value={askTerm} onChange={e=>setAskTerm(e.target.value)} onKeyDown={e=>e.key==="Enter"&&ask()}
+            style={{flex:1,minWidth:240,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none"}}/>
+          <button onClick={ask} disabled={askLoading||!askTerm.trim()}
+            style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:askLoading||!askTerm.trim()?"not-allowed":"pointer",opacity:askLoading||!askTerm.trim()?.5:1}}>
+            {askLoading?"…":"Explain"}
+          </button>
+        </div>
+        {askLoading&&<Loader label="Writing the explanation…"/>}
+        {askError&&<div style={{background:"#1e1010",border:"1px solid #4a1e1e",borderRadius:"var(--radius-sm)",color:"var(--danger)",padding:"14px 16px",fontSize:13,marginTop:12}}>⚠️ {askError}</div>}
+        {askResult&&<ParsedResult text={askResult}/>}
+      </div>
     </div>
   );
 }
@@ -1698,7 +1772,7 @@ function App() {
       {tab==="compare"  && <ComparePanel  apiKey={apiKey}/>}
       {tab==="chain"    && <ChainPanel    apiKey={apiKey}/>}
       {tab==="panel"    && <PanelTab      apiKey={apiKey}/>}
-      {tab==="glossary" && <GlossaryTab/>}
+      {tab==="glossary" && <GlossaryTab apiKey={apiKey}/>}
 
       {/* Disclaimer */}
       <div style={{marginTop:40,padding:"14px 18px",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",fontSize:12,color:"var(--text-dim)",lineHeight:1.5}}>
