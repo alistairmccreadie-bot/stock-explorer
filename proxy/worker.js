@@ -2,9 +2,9 @@
 // Stock Explorer — Cloudflare Worker proxy + shared chain library
 //
 // Routes (all on the same Worker URL):
-//   POST /          → proxy a request to Anthropic   (gated by ACCESS_PASSWORD)
-//   GET  /library   → read the shared chain library   (gated by ACCESS_PASSWORD)
-//   POST /library   → save/delete a chain             (gated by ACCESS_PASSWORD)
+//   POST /          → proxy a request to Anthropic          (gated by ACCESS_PASSWORD)
+//   GET/POST /library  → shared chain library (save/delete)  (gated by ACCESS_PASSWORD)
+//   GET/POST /glossary → shared saved-glossary library       (gated by ACCESS_PASSWORD)
 //
 // Your Anthropic key is held server-side and never reaches any browser.
 //
@@ -19,7 +19,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DEFAULT_ORIGIN = "https://alistairmccreadie-bot.github.io";
-const KV_KEY = "chains"; // single JSON blob: { industryLower: {industry, chainData, result, sources, ts} }
+// KV holds one JSON-blob map per collection: /library → "chains", /glossary → "glossary".
+const COLLECTIONS = { "/library": "chains", "/glossary": "glossary" };
 
 export default {
   async fetch(request, env) {
@@ -39,33 +40,31 @@ export default {
     if (!expected) return json({ error: { message: "Server has no ACCESS_PASSWORD secret. Add it under Settings → Variables and Secrets, then Deploy." } }, 500, cors);
     const accessOk = (request.headers.get("x-access-code") || "").trim() === expected;
 
-    // ── Library routes ────────────────────────────────────────────────────────
-    if (path === "/library") {
+    // ── Collection routes (shared chain library + glossary) ─────────────────────
+    if (COLLECTIONS[path]) {
       if (!env.LIBRARY) return json({ error: { message: "Server has no LIBRARY KV binding. Create a KV namespace and bind it as LIBRARY, then Deploy." } }, 500, cors);
+      if (!accessOk) return json({ error: { message: "Wrong access password." } }, 401, cors);
+      const kvKey = COLLECTIONS[path];
 
       if (request.method === "GET") {
-        if (!accessOk) return json({ error: { message: "Wrong access password." } }, 401, cors);
-        return json({ entries: await readEntries(env) }, 200, cors);
+        return json({ entries: sortEntries(await readMap(env, kvKey)) }, 200, cors);
       }
-
       if (request.method === "POST") {
-        if (!accessOk) return json({ error: { message: "Wrong access password." } }, 401, cors);
         let payload;
         try { payload = JSON.parse(await request.text()); } catch { return json({ error: { message: "Bad request body" } }, 400, cors); }
-
-        const raw = await env.LIBRARY.get(KV_KEY);
-        const map = raw ? JSON.parse(raw) : {};
-        if (payload.action === "save" && payload.entry && payload.entry.industry) {
-          map[payload.entry.industry.trim().toLowerCase()] = payload.entry;
+        const map = await readMap(env, kvKey);
+        if (payload.action === "save" && payload.entry) {
+          const key = ((payload.key || payload.entry.industry || payload.entry.term) || "").trim().toLowerCase();
+          if (!key) return json({ error: { message: "Save needs a key (industry/term)." } }, 400, cors);
+          map[key] = payload.entry;
         } else if (payload.action === "delete" && payload.key) {
           delete map[payload.key.trim().toLowerCase()];
         } else {
-          return json({ error: { message: "Bad library request — need action save/delete." } }, 400, cors);
+          return json({ error: { message: "Bad request — need action save/delete." } }, 400, cors);
         }
-        await env.LIBRARY.put(KV_KEY, JSON.stringify(map));
+        await env.LIBRARY.put(kvKey, JSON.stringify(map));
         return json({ entries: sortEntries(map) }, 200, cors);
       }
-
       return json({ error: { message: "Method not allowed" } }, 405, cors);
     }
 
@@ -88,9 +87,9 @@ export default {
   },
 };
 
-async function readEntries(env) {
-  const raw = await env.LIBRARY.get(KV_KEY);
-  return sortEntries(raw ? JSON.parse(raw) : {});
+async function readMap(env, kvKey) {
+  const raw = await env.LIBRARY.get(kvKey);
+  return raw ? JSON.parse(raw) : {};
 }
 function sortEntries(map) {
   return Object.values(map).sort((a, b) => (b.ts || 0) - (a.ts || 0));

@@ -43,11 +43,12 @@ const STORAGE_KEYS = {
   movers:    "sx_last_movers",
   research:  "sx_last_research",
   compare:   "sx_last_compare",
-  chain:     "sx_last_chain",
-  chainLib:  "sx_chain_library",
-  panel:     "sx_last_panel",
-  valuation: "sx_last_valuation",
-  watchlist: "sx_watchlist",
+  chain:       "sx_last_chain",
+  chainLib:    "sx_chain_library",
+  panel:       "sx_last_panel",
+  valuation:   "sx_last_valuation",
+  glossaryLib: "sx_glossary_library",
+  watchlist:   "sx_watchlist",
 };
 
 // ─── ANTHROPIC API (via Cloudflare Worker proxy) ──────────────────────────────
@@ -196,14 +197,14 @@ async function callClaude(access, sys, usr, maxTokens, useSearch, onDelta) {
 }
 
 // ─── SHARED CHAIN LIBRARY (server-side, via the proxy) ────────────────────────
-async function libraryGet(access) {
-  const res = await fetch(PROXY_URL + "/library", { method:"GET", headers:{ "x-access-code":access } });
+async function libraryGet(access, path="/library") {
+  const res = await fetch(PROXY_URL + path, { method:"GET", headers:{ "x-access-code":access } });
   const data = await res.json().catch(()=>({}));
   if (!res.ok) throw new Error(friendlyError(res.status, data.error));
   return data.entries || [];
 }
-async function libraryWrite(access, payload) {
-  const res = await fetch(PROXY_URL + "/library", {
+async function libraryWrite(access, payload, path="/library") {
+  const res = await fetch(PROXY_URL + path, {
     method:"POST",
     headers:{ "Content-Type":"application/json", "x-access-code":access },
     body: JSON.stringify(payload),
@@ -1618,12 +1619,31 @@ function GlossaryTab({ apiKey }) {
   const [askResult,setAskResult] = useState(null);
   const [askLoading,setAskLoading] = useState(false);
   const [askError,setAskError]   = useState(null);
+  const [saved,setSaved]         = useState(()=>LS.get(STORAGE_KEYS.glossaryLib,[]));
   const askRef = useRef(null);
   const ql=q.trim().toLowerCase();
-  const match=e=> !ql || e.term.toLowerCase().includes(ql) || e.short.toLowerCase().includes(ql) || e.body.toLowerCase().includes(ql);
-  const anyMatch = GLOSSARY_DETAIL.some(match);
+  const match=e=> !ql || e.term.toLowerCase().includes(ql) || (e.short||"").toLowerCase().includes(ql) || e.body.toLowerCase().includes(ql);
+  const anyMatch = GLOSSARY_DETAIL.some(match) || saved.some(match);
 
   const openCurated=term=>{ setOpen(term); setTimeout(()=>{ const el=document.getElementById("gloss-"+gslug(term)); if(el) el.scrollIntoView({behavior:"smooth",block:"start"}); },60); };
+
+  // Load the shared saved-glossary library (mirror to localStorage for instant display).
+  useEffect(()=>{
+    let alive=true;
+    libraryGet(apiKey,"/glossary").then(es=>{ if(alive){ setSaved(es); LS.set(STORAGE_KEYS.glossaryLib,es); } }).catch(()=>{});
+    return ()=>{alive=false;};
+  },[apiKey]);
+
+  const deriveShort=body=>{
+    const lines=(body||"").split("\n").map(l=>l.trim()).filter(Boolean);
+    const first=lines.find(l=>!/^\*\*[^*]+\*\*$/.test(l))||"";
+    const clean=first.replace(/[*`#|>-]/g," ").replace(/\s+/g," ").trim();
+    return clean.length>100?clean.slice(0,100)+"…":clean;
+  };
+  const isCurated=t=>{ const lc=t.toLowerCase(); return GLOSSARY_DETAIL.some(x=>x.term.toLowerCase()===lc)||!!GLOSSARY_LINK[lc]; };
+  const removeSaved=async term=>{
+    try{ const es=await libraryWrite(apiKey,{action:"delete",key:term},"/glossary"); setSaved(es); LS.set(STORAGE_KEYS.glossaryLib,es); }catch(_){}
+  };
 
   const ask=useCallback(async(override)=>{
     const t=((typeof override==="string"?override:askTerm)||"").trim();
@@ -1635,6 +1655,13 @@ function GlossaryTab({ apiKey }) {
       const usr="Explain this investing term: "+t;
       const {text}=await callClaude(apiKey,sys,usr,1600,false);
       setAskResult(text);
+      // Add to the shared glossary library so it accumulates over time (skip already-curated terms).
+      if(!isCurated(t)){
+        try{
+          const es=await libraryWrite(apiKey,{action:"save",entry:{term:t,short:deriveShort(text),body:text,ts:Date.now()}},"/glossary");
+          setSaved(es); LS.set(STORAGE_KEYS.glossaryLib,es);
+        }catch(_){}
+      }
     }catch(e){setAskError(e.message);}finally{setAskLoading(false);}
   },[askTerm,apiKey]);
 
@@ -1681,12 +1708,38 @@ function GlossaryTab({ apiKey }) {
           </div>
         );
       })}
-      {!anyMatch&&<p style={{fontSize:13,color:"var(--text-dim)",marginTop:20}}>No curated terms match "{q}" — try the "Explain another term" box below.</p>}
+      {/* Saved explanations — AI answers that accumulate into the shared library */}
+      {saved.filter(match).length>0&&(
+        <div style={{marginTop:22}}>
+          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"var(--accent3)",marginBottom:10}}>📚 Saved explanations</div>
+          {saved.filter(match).map(e=>{
+            const isOpen=open===e.term;
+            return (
+              <div key={e.term} id={"gloss-"+gslug(e.term)} style={{marginBottom:8,scrollMarginTop:12}}>
+                <div onClick={()=>setOpen(isOpen?null:e.term)}
+                  style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,background:"var(--surface)",border:"1px solid "+(isOpen?"var(--accent)":"var(--border)"),borderRadius:"var(--radius-sm)",padding:"12px 16px",cursor:"pointer"}}>
+                  <span style={{fontSize:14,color:"var(--text)"}}>
+                    <strong style={{fontFamily:"Space Grotesk,sans-serif",fontWeight:700}}>{e.term}</strong>
+                    {e.short&&<span style={{color:"var(--text-muted)"}}> — {e.short}</span>}
+                  </span>
+                  <span style={{display:"inline-flex",alignItems:"center",gap:12,flexShrink:0}}>
+                    <button onClick={ev=>{ev.stopPropagation();removeSaved(e.term);}} title="Remove from library"
+                      style={{background:"none",border:"none",color:"var(--text-dim)",fontSize:15,lineHeight:1,cursor:"pointer",padding:0}}>×</button>
+                    <span style={{color:"var(--accent)",fontSize:18,lineHeight:1}}>{isOpen?"−":"+"}</span>
+                  </span>
+                </div>
+                {isOpen&&<ParsedResult text={e.body}/>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {!anyMatch&&<p style={{fontSize:13,color:"var(--text-dim)",marginTop:20}}>No terms match "{q}" — try the "Explain another term" box below.</p>}
 
       {/* AI: explain any other term */}
       <div ref={askRef} style={{marginTop:34,paddingTop:24,borderTop:"1px solid var(--border)",scrollMarginTop:12}}>
         <h3 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:700,marginBottom:6}}>🤖 Explain another term</h3>
-        <p style={{fontSize:13,color:"var(--text-muted)",marginBottom:14}}>Not in the list above? Type any investing term or concept and get a full explanation in the same style.</p>
+        <p style={{fontSize:13,color:"var(--text-muted)",marginBottom:14}}>Not in the list above? Type any investing term or concept and get a full explanation in the same style. It's saved to your shared glossary above, so the library grows over time.</p>
         <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
           <input placeholder="e.g. short selling, beta, working capital" value={askTerm} onChange={e=>setAskTerm(e.target.value)} onKeyDown={e=>e.key==="Enter"&&ask()}
             style={{flex:1,minWidth:240,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none"}}/>
