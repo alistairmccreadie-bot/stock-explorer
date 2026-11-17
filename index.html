@@ -56,6 +56,7 @@ const STORAGE_KEYS = {
 // Requests go to our own Worker, which holds the Anthropic key server-side and
 // checks a shared access password. The key is never present in the browser.
 const PROXY_URL = "https://stock-explorer-proxy.alistair-mccreadie.workers.dev";
+const BUILD = "2026-11-17 · data-grounding";  // shown in the footer so you can confirm the live build
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
 // Model tiers — route each task to the right capability/cost point.
@@ -227,6 +228,33 @@ async function marketGet(access, fn, symbol, extra={}) {
   // Twelve Data signals its own errors in the body: { status:"error", code, message }.
   if (data && data.status === "error") throw new Error(data.message || "Market-data error.");
   return data;
+}
+
+// Build a block of real, current feed figures to anchor an AI analysis. Returns "" on any
+// failure so the calling tab still works. Price/ranges are always from the feed; multiples
+// only when the data plan includes them.
+async function marketContextBlock(access, ticker) {
+  try {
+    const [q,st] = await Promise.allSettled([ marketGet(access,"quote",ticker), marketGet(access,"statistics",ticker) ]);
+    if (q.status!=="fulfilled") return "";
+    const d=q.value;
+    const vm = (st.status==="fulfilled" && st.value && st.value.statistics) ? st.value.statistics.valuations_metrics : null;
+    const L = [
+      "VERIFIED CURRENT MARKET DATA for "+(d.symbol||ticker)+" (from a live data feed — treat these as the authoritative current figures, and base any price-move or valuation maths on this current price):",
+      d.close!=null ? "- Current price: "+d.close+" "+(d.currency||"")+(d.percent_change!=null?" (today "+d.percent_change+"%)":"") : null,
+      d.fifty_two_week ? "- 52-week range: "+d.fifty_two_week.range : null,
+      (d.low&&d.high) ? "- Day range: "+d.low+" – "+d.high : null,
+    ];
+    if (vm) {
+      if (vm.market_capitalization) L.push("- Market cap (USD): "+vm.market_capitalization);
+      if (vm.trailing_pe) L.push("- Trailing P/E: "+vm.trailing_pe);
+      if (vm.forward_pe) L.push("- Forward P/E: "+vm.forward_pe);
+      if (vm.price_to_sales_ttm) L.push("- P/S (TTM): "+vm.price_to_sales_ttm);
+      if (vm.price_to_book_mrq) L.push("- P/B: "+vm.price_to_book_mrq);
+      if (vm.peg_ratio) L.push("- PEG: "+vm.peg_ratio);
+    }
+    return L.filter(Boolean).join("\n")+"\n\n";
+  } catch { return ""; }
 }
 
 // ─── SHARED CHAIN LIBRARY (server-side, via the proxy) ────────────────────────
@@ -868,7 +896,8 @@ function ResearchPanel({ apiKey }) {
           {h:"Verdict", d:"2-4 sentences — is this an interesting company to learn from, and why."},
         ]
       );
-      const usr="Research "+tk.toUpperCase()+" as an investment. Find latest earnings, revenue growth, competitive position, valuation multiples, and analyst views. Follow the required section format exactly.";
+      const ctx=await marketContextBlock(apiKey, tk.toUpperCase());
+      const usr=ctx+"Research "+tk.toUpperCase()+" as an investment. Find latest earnings, revenue growth, competitive position, valuation multiples, and analyst views. Follow the required section format exactly.";
       const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult);
       const now=Date.now();setResult(text);setSources(src);setTs(now);
       LS.set(STORAGE_KEYS.research,{ticker:tk,result:text,sources:src,ts:now});
@@ -1352,7 +1381,8 @@ function ValuationPanel({ apiKey }) {
           {h:"What Today's Price Assumes", d:"1-3 sentences on the earnings growth and/or margins the current multiple implies — i.e., the expectations baked into the price."},
         ]
       );
-      const usr="Analyse the valuation of "+T+" versus its industry/sector and its own ~5-year history. Search for current and historical valuation multiples for both the company and its peer group. Follow the required format exactly.";
+      const ctx=await marketContextBlock(apiKey, T);
+      const usr=ctx+"Analyse the valuation of "+T+" versus its industry/sector and its own ~5-year history. Search for current and historical valuation multiples for both the company and its peer group. Follow the required format exactly.";
       const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult,{model:MODEL_DEEP,effort:"high"});
       const now=Date.now();setResult(text);setSources(src);setTs(now);
       LS.set(STORAGE_KEYS.valuation,{ticker:tk,result:text,sources:src,ts:now});
@@ -2213,6 +2243,7 @@ function App() {
         Always do your own research and consult a licensed financial adviser before making investment decisions.
         AI-generated analysis may contain errors — verify important figures independently.
       </div>
+      <div style={{textAlign:"center",marginTop:14,fontSize:11,color:"var(--text-dim)"}}>Stock Explorer · build {BUILD}</div>
     </div>
   );
 }
