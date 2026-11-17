@@ -57,10 +57,18 @@ const STORAGE_KEYS = {
 const PROXY_URL = "https://stock-explorer-proxy.alistair-mccreadie.workers.dev";
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
-// max_tokens is a CEILING, not a target — the model only emits what it needs, so
-// a high cap costs nothing extra but prevents web-search overhead (tool-use blocks
-// count against the budget) from truncating multi-section answers.
-const MAX_NARRATIVE = 8000;
+// Model tiers — route each task to the right capability/cost point.
+//   DEEP  — decision-critical reasoning (valuation, analyst panel)
+//   STD   — the research workhorse (movers, research, compare, chain, drill) — newer AND cheaper than the old Sonnet 4.6
+//   LITE  — quick, cheap lookups (glossary definitions, key check)
+// To dial cost down, set MODEL_DEEP to MODEL_STD; to dial quality up, set MODEL_STD to MODEL_DEEP.
+const MODEL_DEEP = "claude-opus-5-5";
+const MODEL_STD  = "claude-sonnet-5-5";
+const MODEL_LITE = "claude-haiku-5-5";
+
+// max_tokens is a CEILING, not a target — the model only emits what it needs, so a high
+// cap costs nothing extra but gives adaptive thinking + web tools room without truncating.
+const MAX_NARRATIVE = 16000;
 
 // ─── LOCKED OUTPUT FORMAT ─────────────────────────────────────────────────────
 // One shared spec so every tab produces the same shape every run: balanced length,
@@ -152,16 +160,26 @@ async function readStream(res, onDelta) {
 
 // Returns { text, sources }. `access` is the shared password sent to our proxy.
 // Pass onDelta to stream tokens as they arrive.
-async function callClaude(access, sys, usr, maxTokens, useSearch, onDelta) {
+// opts: { model, effort ("low"|"medium"|"high"...), thinking (false to disable), webFetch (false to disable) }
+async function callClaude(access, sys, usr, maxTokens, useSearch, onDelta, opts={}) {
   const stream = typeof onDelta === "function";
   const body = {
-    model: "claude-sonnet-4-6",
+    model: opts.model || MODEL_STD,
     max_tokens: maxTokens || 1200,
     system: sys,
     messages: [{ role:"user", content:usr }],
+    output_config: { effort: opts.effort || "medium" },
   };
+  // Adaptive thinking: the model decides when and how deeply to reason. On by default
+  // for analysis; opt out only for trivial calls.
+  if (opts.thinking !== false) body.thinking = { type:"adaptive" };
   if (stream) body.stream = true;
-  if (useSearch !== false) body.tools = [{ type:"web_search_20250305", name:"web_search" }];
+  if (useSearch !== false) {
+    // Current web tools with dynamic filtering; web_fetch lets Claude read a source
+    // page (filing, IR release) it finds, not just the search snippet.
+    body.tools = [{ type:"web_search_20260209", name:"web_search", max_uses:6 }];
+    if (opts.webFetch !== false) body.tools.push({ type:"web_fetch_20260209", name:"web_fetch", max_uses:4 });
+  }
 
   let lastStatus = 0;
   for (let attempt=0; attempt<3; attempt++) {
@@ -225,7 +243,7 @@ function ApiKeyGate({ onKey }) {
     if (!code) { setErr("Please enter the access password."); return; }
     setT(true); setErr(null);
     try {
-      await callClaude(code, "You are a test.", "Reply with the single word: ready", 10, false);
+      await callClaude(code, "You are a test.", "Reply with the single word: ready", 64, false, undefined, {model:MODEL_LITE, effort:"low", thinking:false});
       LS.set(STORAGE_KEYS.access, code);
       onKey(code);
     } catch(e) { setErr(e.message); }
@@ -1001,7 +1019,7 @@ function ChainPanel({ apiKey }) {
         "Return ONLY the JSON object.",
       ].join("\n");
       const structUsr="Return the complete value chain stages and flow edges for the "+industry+" industry. Real tickers only. Capture real branching, not a linear chain. Mark the 1-2 most beginner-friendly stages.";
-      const {text:jsonRaw}=await callClaude(apiKey,structSys,structUsr,2000,false);
+      const {text:jsonRaw}=await callClaude(apiKey,structSys,structUsr,4000,false,undefined,{effort:"low"});
       let parsedData=null;
       try{
         // Strip code fences, then isolate the outermost { ... } in case of stray prose.
@@ -1234,7 +1252,7 @@ function PanelTab({ apiKey }) {
       const usr = mode==="thesis"
         ? "Convene the panel to stress-test this investment thesis:\n\""+thesis.trim()+"\"\nFollow the required format exactly."
         : "Convene the panel to generate investment ideas. "+(focus.trim()?("Focus area: "+focus.trim()+"."):"No specific focus — consider the broad global market.")+" Follow the required format exactly.";
-      const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult);
+      const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult,{model:MODEL_DEEP,effort:"high"});
       const now=Date.now();setResult(text);setSources(src);setTs(now);
       LS.set(STORAGE_KEYS.panel,{mode,focus,thesis,result:text,sources:src,ts:now});
     }catch(e){setError(e.message);}finally{setLoading(false);}
@@ -1320,7 +1338,7 @@ function ValuationPanel({ apiKey }) {
         ]
       );
       const usr="Analyse the valuation of "+T+" versus its industry/sector and its own ~5-year history. Search for current and historical valuation multiples for both the company and its peer group. Follow the required format exactly.";
-      const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult);
+      const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult,{model:MODEL_DEEP,effort:"high"});
       const now=Date.now();setResult(text);setSources(src);setTs(now);
       LS.set(STORAGE_KEYS.valuation,{ticker:tk,result:text,sources:src,ts:now});
     }catch(e){setError(e.message);}finally{setLoading(false);}
@@ -1812,7 +1830,7 @@ function GlossaryTab({ apiKey }) {
         "THEN, on the following lines, explain the term using EXACTLY these bold-labelled sections, each on its own line: **What it is**, **How to read it**, **Worked example** (use real illustrative numbers; a small Markdown table is good when it helps), **Watch out for**.\n"+
         "Keep it balanced and plain-English; explain any jargon. If the term isn't a finance/investing concept, still give the CATEGORY line (use Quality & concepts) then say in one line that it isn't a finance term.";
       const usr="Explain this investing term: "+t;
-      const {text}=await callClaude(apiKey,sys,usr,1600,false);
+      const {text}=await callClaude(apiKey,sys,usr,1600,false,undefined,{model:MODEL_LITE,effort:"low"});
       // Pull the CATEGORY line off the top and validate it against the known list.
       let cat="Quality & concepts", body=text;
       const m=text.match(/^\s*CATEGORY:\s*(.+)$/im);
