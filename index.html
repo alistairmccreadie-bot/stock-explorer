@@ -49,6 +49,7 @@ const STORAGE_KEYS = {
   valuation:   "sx_last_valuation",
   glossaryLib: "sx_glossary_library",
   market:      "sx_last_market",
+  markets:     "sx_last_markets",
   watchlist:   "sx_watchlist",
 };
 
@@ -2164,9 +2165,157 @@ function ChartPanel({ apiKey }) {
   );
 }
 
+// ─── PANEL: Markets (indices/ETFs + macro) ────────────────────────────────────
+function marketsIndexSys() {
+  return buildSys(
+    "You are an investment educator explaining an index or ETF to an 18-year-old learning to invest. Be specific with real holdings, weights and figures (search the web).",
+    [
+      {h:"What It Tracks", d:"1-2 sentences: what it holds and its strategy, and roughly how many holdings."},
+      {h:"Top Holdings", d:"A Markdown table, columns: | Holding | Ticker | Weight % |. The 8-10 largest holdings with approximate current weights."},
+      {h:"Sector & Geographic Weights", d:"A Markdown table, columns: | Segment | Weight % |, covering the main sector weights (and country/region if relevant)."},
+      {h:"Valuation & Yield", d:"2-4 sentences on aggregate valuation (P/E), dividend yield and (for an ETF) expense ratio, versus history where known."},
+      {h:"What Drives It", d:"2-4 sentences on the main factors that move it."},
+      {h:"Concentration & Key Risks", d:"3-4 short bullet points."},
+    ]
+  );
+}
+function marketsMacroSys() {
+  return buildSys(
+    "You are a macro strategist giving an 18-year-old a current, plain-English snapshot of the market backdrop. Use the latest real figures (search the web) and state them clearly; explain any jargon.",
+    [
+      {h:"The Big Picture", d:"3-4 sentences on the current backdrop — growth, inflation, the direction of interest rates, and market mood."},
+      {h:"Rates & Inflation", d:"A Markdown table, columns: | Indicator | Latest |, rows: Fed funds rate, US 10-year Treasury yield, US 2-year yield, 10y–2y spread, CPI inflation (YoY), Core PCE (YoY), Unemployment rate."},
+      {h:"Markets", d:"A Markdown table, columns: | Market | Level | Recent trend |, rows: S&P 500, Nasdaq 100, Dow Jones, Russell 2000, VIX, US Dollar Index (DXY), Gold, WTI crude oil, Bitcoin."},
+      {h:"What It Means for Investors", d:"3-5 short bullet points on what this backdrop implies for stocks and bonds, and what to watch next."},
+    ]
+  );
+}
+
+function MarketsPanel({ apiKey }) {
+  const saved=LS.get(STORAGE_KEYS.markets)||{};
+  const [mode,setMode]       = useState(saved.mode||"index");
+  const [symbol,setSymbol]   = useState(saved.symbol||"");
+  const [quote,setQuote]     = useState(saved.quote||null);
+  const [series,setSeries]   = useState(saved.series||null);
+  const [range,setRange]     = useState(saved.range||"1Y");
+  const [idxRes,setIdxRes]   = useState(saved.idxRes||null);
+  const [idxSrc,setIdxSrc]   = useState(saved.idxSrc||null);
+  const [idxTs,setIdxTs]     = useState(saved.idxTs||null);
+  const [macroRes,setMacroRes] = useState(saved.macroRes||null);
+  const [macroSrc,setMacroSrc] = useState(saved.macroSrc||null);
+  const [macroTs,setMacroTs]   = useState(saved.macroTs||null);
+  const [loading,setLoading] = useState(false);
+  const [error,setError]     = useState(null);
+  const save=(o)=>LS.set(STORAGE_KEYS.markets,{mode,symbol,quote,series,range,idxRes,idxSrc,idxTs,macroRes,macroSrc,macroTs,...o});
+  const switchMode=m=>{ if(m!==mode){ setMode(m); setError(null); save({mode:m}); } };
+  const clearIdx=()=>{ setIdxRes(null);setIdxSrc(null);setIdxTs(null);setQuote(null);setSeries(null); save({idxRes:null,idxSrc:null,idxTs:null,quote:null,series:null}); };
+  const clearMacro=()=>{ setMacroRes(null);setMacroSrc(null);setMacroTs(null); save({macroRes:null,macroSrc:null,macroTs:null}); };
+
+  const runIndex=useCallback(async(override)=>{
+    const sym=((typeof override==="string"?override:symbol)||"").trim().toUpperCase();
+    if(!sym)return;
+    setLoading(true);setError(null);setIdxRes(null);setIdxSrc(null);setIdxTs(null);
+    try{
+      const [q,tsr]=await Promise.allSettled([ marketGet(apiKey,"quote",sym), marketGet(apiKey,"timeseries",sym,{outputsize:String(RANGES[range])}) ]);
+      const qv=q.status==="fulfilled"?q.value:null, sv=tsr.status==="fulfilled"?toSeries(tsr.value):[];
+      setSymbol(sym);setQuote(qv);setSeries(sv);
+      const ctx=await marketContextBlock(apiKey,sym);
+      const usr=ctx+"Analyse the index or ETF "+sym+". Give real holdings and approximate current weights. Follow the required format exactly.";
+      const {text,sources}=await callClaude(apiKey, marketsIndexSys(), usr, MAX_NARRATIVE, true, setIdxRes, {model:MODEL_STD, effort:"medium"});
+      const now=Date.now();
+      setIdxRes(text);setIdxSrc(sources);setIdxTs(now);
+      LS.set(STORAGE_KEYS.markets,{...(LS.get(STORAGE_KEYS.markets)||{}),mode:"index",symbol:sym,quote:qv,series:sv,range,idxRes:text,idxSrc:sources,idxTs:now});
+    }catch(e){setError(e.message);}finally{setLoading(false);}
+  },[symbol,apiKey,range]);
+  const pickIdx=t=>runIndex(t);
+
+  const changeRange=useCallback(async(rk)=>{
+    setRange(rk); if(!symbol){save({range:rk});return;}
+    try{ const tsr=await marketGet(apiKey,"timeseries",symbol,{outputsize:String(RANGES[rk])}); const sv=toSeries(tsr); setSeries(sv); save({range:rk,series:sv}); }catch(e){setError(e.message);}
+  },[symbol,apiKey,quote,idxRes,idxSrc,idxTs,macroRes,macroSrc,macroTs]);
+
+  const runMacro=useCallback(async()=>{
+    setLoading(true);setError(null);setMacroRes(null);setMacroSrc(null);setMacroTs(null);
+    try{
+      const usr="Give the current macro snapshot as of today. Search the web for the very latest figures. Follow the required format exactly.";
+      const {text,sources}=await callClaude(apiKey, marketsMacroSys(), usr, MAX_NARRATIVE, true, setMacroRes, {model:MODEL_STD, effort:"medium"});
+      const now=Date.now();
+      setMacroRes(text);setMacroSrc(sources);setMacroTs(now);
+      LS.set(STORAGE_KEYS.markets,{...(LS.get(STORAGE_KEYS.markets)||{}),mode:"macro",macroRes:text,macroSrc:sources,macroTs:now});
+    }catch(e){setError(e.message);}finally{setLoading(false);}
+  },[apiKey]);
+
+  const up=quote && Number(quote.change)>=0;
+  const p0=series&&series.length>1?series[0].c:null, pN=series&&series.length?series[series.length-1].c:null;
+  const periodPct=(p0&&pN)?((pN-p0)/p0)*100:null, periodUp=periodPct>=0;
+  const tabBtn=(m,label)=>(
+    <button onClick={()=>switchMode(m)} style={{padding:"8px 16px",borderRadius:8,border:"1px solid "+(mode===m?"var(--accent)":"var(--border)"),background:mode===m?"var(--surface2)":"none",color:mode===m?"var(--accent)":"var(--text-muted)",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:"pointer"}}>{label}</button>
+  );
+
+  return (
+    <div style={{padding:"28px 0"}}>
+      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Markets</h2>
+      <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:16}}>Look inside an index or ETF — what it holds and what moves it — or get a plain-English snapshot of the macro backdrop.</p>
+      <div style={{display:"flex",gap:8,marginBottom:18}}>
+        {tabBtn("index","📈 Index / ETF")}
+        {tabBtn("macro","🌍 Macro")}
+      </div>
+
+      {mode==="index" ? (
+        <>
+          <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
+            <input placeholder="e.g. SPY, QQQ, IWM" value={symbol} onChange={e=>setSymbol(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&runIndex()} maxLength={12}
+              style={{width:160,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
+            <StarToggle ticker={symbol}/>
+            <button onClick={runIndex} disabled={loading||!symbol.trim()}
+              style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!symbol.trim()?"not-allowed":"pointer",opacity:loading||!symbol.trim()?.5:1}}>
+              {loading?"…":"Analyse"}
+            </button>
+          </div>
+          <Chips items={["SPY","QQQ","DIA","IWM","VTI","EFA"]} onClick={t=>setSymbol(t)} style={{marginBottom:16}}/>
+          <WatchlistBar onPick={pickIdx}/>
+          {quote&&(
+            <div style={{marginBottom:14}}>
+              <div style={{display:"flex",alignItems:"baseline",gap:12,flexWrap:"wrap",marginBottom:8}}>
+                <span style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700}}>{quote.symbol}</span>
+                <span style={{fontSize:22,fontWeight:700,fontFamily:"Space Grotesk,sans-serif"}}>{fmtNum(quote.close)}</span>
+                <span style={{fontSize:14,fontWeight:600,color:up?"var(--accent2)":"var(--danger)"}}>{up?"▲ +":"▼ "}{fmt2(quote.percent_change)}% <span style={{color:"var(--text-dim)",fontWeight:400,fontSize:12}}>today</span></span>
+                {periodPct!=null&&<span style={{fontSize:14,fontWeight:600,color:periodUp?"var(--accent2)":"var(--danger)"}}>{periodUp?"▲ +":"▼ "}{fmt2(periodPct)}% <span style={{color:"var(--text-dim)",fontWeight:400,fontSize:12}}>{range}</span></span>}
+              </div>
+              <div style={{display:"flex",gap:6,marginBottom:6}}>
+                {Object.keys(RANGES).map(rk=>(
+                  <button key={rk} onClick={()=>changeRange(rk)} style={{padding:"4px 12px",borderRadius:20,border:"1px solid "+(range===rk?"var(--accent)":"var(--border)"),background:range===rk?"var(--surface2)":"none",color:range===rk?"var(--accent)":"var(--text-muted)",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Inter,sans-serif"}}>{rk}</button>
+                ))}
+              </div>
+              <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"12px 14px"}}><PriceChart points={series}/></div>
+            </div>
+          )}
+          {loading&&!idxRes&&<Loader label="Researching the index / ETF…"/>}
+          {error&&<div style={{background:"#1e1010",border:"1px solid #4a1e1e",borderRadius:"var(--radius-sm)",color:"var(--danger)",padding:"14px 16px",fontSize:13}}>⚠️ {error}</div>}
+          {idxRes&&<>{idxTs&&<CachedBanner timestamp={idxTs} onClear={clearIdx}/>}{loading&&<StreamNote/>}<ParsedResult text={idxRes} sources={idxSrc}/></>}
+        </>
+      ) : (
+        <>
+          <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:20}}>
+            <button onClick={runMacro} disabled={loading}
+              style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading?"not-allowed":"pointer",opacity:loading?.5:1}}>
+              {loading?"…":(macroRes?"Refresh snapshot":"Generate macro snapshot")}
+            </button>
+            <span style={{fontSize:12,color:"var(--text-dim)"}}>Current rates, inflation and markets, with a plain-English read.</span>
+          </div>
+          {loading&&!macroRes&&<Loader label="Pulling the latest macro data…"/>}
+          {error&&<div style={{background:"#1e1010",border:"1px solid #4a1e1e",borderRadius:"var(--radius-sm)",color:"var(--danger)",padding:"14px 16px",fontSize:13}}>⚠️ {error}</div>}
+          {macroRes&&<>{macroTs&&<CachedBanner timestamp={macroTs} onClear={clearMacro}/>}{loading&&<StreamNote/>}<ParsedResult text={macroRes} sources={macroSrc}/></>}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── APP ──────────────────────────────────────────────────────────────────────
 const NAV=[
   {id:"chart",   label:"Price & Data",     icon:"📊"},
+  {id:"markets", label:"Markets",          icon:"🌐"},
   {id:"movers",  label:"Why Did It Move?", icon:"📈"},
   {id:"research",label:"Company Research",  icon:"🔍"},
   {id:"valuation",label:"Valuation",        icon:"🏷️"},
@@ -2235,6 +2384,7 @@ function App() {
       {tab==="chain"    && <ChainPanel    apiKey={apiKey}/>}
       {tab==="panel"    && <PanelTab      apiKey={apiKey}/>}
       {tab==="chart"    && <ChartPanel    apiKey={apiKey}/>}
+      {tab==="markets"  && <MarketsPanel  apiKey={apiKey}/>}
       {tab==="glossary" && <GlossaryTab apiKey={apiKey}/>}
 
       {/* Disclaimer */}
