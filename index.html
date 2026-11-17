@@ -1995,13 +1995,26 @@ function ChartPanel({ apiKey }) {
   const [ticker,setTicker]   = useState(saved?.ticker||"");
   const [quote,setQuote]     = useState(saved?.quote||null);
   const [series,setSeries]   = useState(saved?.series||null);
-  const [stats,setStats]     = useState(saved?.stats||null);
-  const [profile,setProfile] = useState(saved?.profile||null);
+  const [fund,setFund]       = useState(saved?.fund||null);
+  const [info,setInfo]       = useState(saved?.info||null);
+  const [fundSrc,setFundSrc] = useState(saved?.fundSrc||"");
+  const [fundLoading,setFundLoading] = useState(false);
   const [range,setRange]     = useState(saved?.range||"1Y");
   const [ts,setTs]           = useState(saved?.ts||null);
   const [loading,setLoading] = useState(false);
   const [error,setError]     = useState(null);
-  const persist=(o)=>LS.set(STORAGE_KEYS.market,{ticker,quote,series,stats,profile,range,ts,...o});
+  const persist=(o)=>LS.set(STORAGE_KEYS.market,{ticker,quote,series,fund,info,fundSrc,range,ts,...o});
+
+  // The free Twelve Data plan has no fundamentals — fill them with a cheap web lookup.
+  const fetchFund=async(tk)=>{
+    const sys="Return ONLY a valid JSON object (no markdown fences, no prose) with current market figures for the given ticker (stock, ETF or index). Keys and types: market_cap (number in USD or null), trailing_pe (number or null), forward_pe (number or null), peg (number or null), ps (number or null), pb (number or null), sector (string or null), industry (string or null), summary (string one sentence or null). Search the web for current values; use null where genuinely unknown.";
+    try{
+      const {text}=await callClaude(apiKey,sys,"Ticker: "+tk,1200,true,undefined,{model:MODEL_STD,effort:"low"});
+      let c=text.replace(/^```[\w]*\n?/gm,"").replace(/```/g,"").trim();
+      const a=c.indexOf("{"),b=c.lastIndexOf("}"); if(a>=0&&b>a)c=c.slice(a,b+1);
+      return JSON.parse(c);
+    }catch(_){ return null; }
+  };
 
   const loadAll=useCallback(async(override,rng)=>{
     const tk=((typeof override==="string"?override:ticker)||"").trim().toUpperCase();
@@ -2016,10 +2029,28 @@ function ChartPanel({ apiKey }) {
         marketGet(apiKey,"profile",tk),
       ]);
       if(q.status!=="fulfilled") throw q.reason;
-      const qv=q.value, sv=tsr.status==="fulfilled"?toSeries(tsr.value):[], stv=st.status==="fulfilled"?st.value:null, prv=pr.status==="fulfilled"?pr.value:null;
+      const qv=q.value, sv=tsr.status==="fulfilled"?toSeries(tsr.value):[];
+      const vm = (st.status==="fulfilled" && st.value && st.value.statistics) ? st.value.statistics.valuations_metrics : null;
+      const prv = pr.status==="fulfilled" ? pr.value : null;
       const now=Date.now();
-      setTicker(tk);setQuote(qv);setSeries(sv);setStats(stv);setProfile(prv);setRange(rk);setTs(now);
-      LS.set(STORAGE_KEYS.market,{ticker:tk,quote:qv,series:sv,stats:stv,profile:prv,range:rk,ts:now});
+      let fundObj = (vm && (vm.market_capitalization||vm.trailing_pe)) ? {marketCap:vm.market_capitalization,trailingPe:vm.trailing_pe,forwardPe:vm.forward_pe,peg:vm.peg_ratio,ps:vm.price_to_sales_ttm,pb:vm.price_to_book_mrq} : null;
+      let infoObj = (prv && (prv.sector||prv.description)) ? {sector:prv.sector,industry:prv.industry,summary:prv.description,employees:prv.employees} : null;
+      let src = fundObj ? "Twelve Data" : "";
+      // Show price + chart immediately.
+      setTicker(tk);setQuote(qv);setSeries(sv);setRange(rk);setTs(now);setFund(fundObj);setInfo(infoObj);setFundSrc(src);
+      LS.set(STORAGE_KEYS.market,{ticker:tk,quote:qv,series:sv,fund:fundObj,info:infoObj,fundSrc:src,range:rk,ts:now});
+      // Fill any missing fundamentals via the web.
+      if(!fundObj || !infoObj){
+        setFundLoading(true);
+        const o=await fetchFund(tk);
+        setFundLoading(false);
+        if(o){
+          if(!fundObj){ fundObj={marketCap:o.market_cap,trailingPe:o.trailing_pe,forwardPe:o.forward_pe,peg:o.peg,ps:o.ps,pb:o.pb}; src="web"; }
+          if(!infoObj){ infoObj={sector:o.sector,industry:o.industry,summary:o.summary}; }
+          setFund(fundObj);setInfo(infoObj);setFundSrc(src);
+          LS.set(STORAGE_KEYS.market,{ticker:tk,quote:qv,series:sv,fund:fundObj,info:infoObj,fundSrc:src,range:rk,ts:now});
+        }
+      }
     }catch(e){setError(e.message);}finally{setLoading(false);}
   },[ticker,apiKey,range]);
   const pick=t=>loadAll(t);
@@ -2029,10 +2060,12 @@ function ChartPanel({ apiKey }) {
     if(!ticker){persist({range:rk});return;}
     try{ const tsr=await marketGet(apiKey,"timeseries",ticker,{outputsize:String(RANGES[rk])}); const sv=toSeries(tsr); setSeries(sv); persist({range:rk,series:sv}); }
     catch(e){ setError(e.message); }
-  },[ticker,apiKey,quote,stats,profile,ts]);
+  },[ticker,apiKey,fund,info,fundSrc,ts]);
 
-  const vm = stats && stats.statistics && stats.statistics.valuations_metrics;
   const up = quote && Number(quote.change)>=0;
+  const p0 = series&&series.length>1 ? series[0].c : null, pN = series&&series.length ? series[series.length-1].c : null;
+  const periodPct = (p0&&pN) ? ((pN-p0)/p0)*100 : null, periodUp = periodPct>=0;
+  const stat = (val, fmt) => (val!=null && val!=="" && isFinite(Number(val))) ? fmt(val) : (fundLoading && !fund ? "…" : "n/a");
   return (
     <div style={{padding:"28px 0"}}>
       <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Price &amp; Data</h2>
@@ -2059,9 +2092,10 @@ function ChartPanel({ apiKey }) {
           </div>
           <div style={{display:"flex",alignItems:"baseline",gap:12,flexWrap:"wrap",marginBottom:16}}>
             <span style={{fontSize:30,fontWeight:700,fontFamily:"Space Grotesk,sans-serif"}}>{fmtNum(quote.close)} <span style={{fontSize:14,color:"var(--text-dim)",fontWeight:400}}>{quote.currency}</span></span>
-            <span style={{fontSize:16,fontWeight:600,color:up?"var(--accent2)":"var(--danger)"}}>{up?"▲ +":"▼ "}{fmtNum(quote.change)} ({up?"+":""}{fmt2(quote.percent_change)}%)</span>
-            <span style={{fontSize:12,color:"var(--text-dim)"}}>{quote.exchange} · as of {quote.datetime}{quote.is_market_open?" · open":""}</span>
+            <span style={{fontSize:15,fontWeight:600,color:up?"var(--accent2)":"var(--danger)"}}>{up?"▲ +":"▼ "}{fmtNum(quote.change)} ({up?"+":""}{fmt2(quote.percent_change)}%) <span style={{color:"var(--text-dim)",fontWeight:400,fontSize:12}}>today</span></span>
+            {periodPct!=null&&<span style={{fontSize:15,fontWeight:600,color:periodUp?"var(--accent2)":"var(--danger)"}}>{periodUp?"▲ +":"▼ "}{fmt2(periodPct)}% <span style={{color:"var(--text-dim)",fontWeight:400,fontSize:12}}>{range}</span></span>}
           </div>
+          <div style={{fontSize:12,color:"var(--text-dim)",marginBottom:16}}>{quote.exchange} · as of {quote.datetime}{quote.is_market_open?" · market open":""}</div>
           {/* Range toggles */}
           <div style={{display:"flex",gap:6,marginBottom:4}}>
             {Object.keys(RANGES).map(rk=>(
@@ -2074,24 +2108,26 @@ function ChartPanel({ apiKey }) {
           </div>
           {/* Key stats */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10,marginBottom:18}}>
-            <StatTile label="Market cap" value={fmtBig(vm&&vm.market_capitalization,true)}/>
-            <StatTile label="Trailing P/E" value={fmtX(vm&&vm.trailing_pe)}/>
-            <StatTile label="Forward P/E" value={fmtX(vm&&vm.forward_pe)}/>
-            <StatTile label="PEG" value={fmt2(vm&&vm.peg_ratio)}/>
-            <StatTile label="P/S (TTM)" value={fmtX(vm&&vm.price_to_sales_ttm)}/>
-            <StatTile label="P/B" value={fmtX(vm&&vm.price_to_book_mrq)}/>
+            <StatTile label="Market cap" value={stat(fund&&fund.marketCap, v=>fmtBig(v,true))}/>
+            <StatTile label="Trailing P/E" value={stat(fund&&fund.trailingPe, fmtX)}/>
+            <StatTile label="Forward P/E" value={stat(fund&&fund.forwardPe, fmtX)}/>
+            <StatTile label="PEG" value={stat(fund&&fund.peg, fmt2)}/>
+            <StatTile label="P/S (TTM)" value={stat(fund&&fund.ps, fmtX)}/>
+            <StatTile label="P/B" value={stat(fund&&fund.pb, fmtX)}/>
             <StatTile label="52-week range" value={quote.fifty_two_week?quote.fifty_two_week.range:"n/a"}/>
             <StatTile label="Day range" value={fmtNum(quote.low)+" – "+fmtNum(quote.high)}/>
             <StatTile label="Volume" value={fmtBig(quote.volume)}/>
             <StatTile label="Avg volume" value={fmtBig(quote.average_volume)}/>
           </div>
-          {profile&&(profile.sector||profile.description)&&(
+          {info&&(info.sector||info.summary)&&(
             <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"16px 18px",fontSize:13,color:"var(--text-muted)",lineHeight:1.6}}>
-              {(profile.sector||profile.industry)&&<div style={{marginBottom:6,color:"var(--text)"}}><strong style={{fontFamily:"Space Grotesk,sans-serif"}}>{profile.sector}</strong>{profile.industry?" · "+profile.industry:""}{profile.employees?" · "+fmtBig(profile.employees)+" employees":""}</div>}
-              {profile.description&&<div>{profile.description.length>320?profile.description.slice(0,320)+"…":profile.description}</div>}
+              {(info.sector||info.industry)&&<div style={{marginBottom:6,color:"var(--text)"}}><strong style={{fontFamily:"Space Grotesk,sans-serif"}}>{info.sector}</strong>{info.industry?" · "+info.industry:""}{info.employees?" · "+fmtBig(info.employees)+" employees":""}</div>}
+              {info.summary&&<div>{info.summary.length>320?info.summary.slice(0,320)+"…":info.summary}</div>}
             </div>
           )}
-          <div style={{fontSize:11,color:"var(--text-dim)",marginTop:12}}>Data: Twelve Data{ts?" · loaded "+new Date(ts).toLocaleString("en-AU",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):""}. Figures may be delayed; verify before trading.</div>
+          <div style={{fontSize:11,color:"var(--text-dim)",marginTop:12}}>
+            Price &amp; chart: Twelve Data{fundSrc?" · fundamentals: "+(fundSrc==="web"?"web (AI)":fundSrc):""}{fundLoading?" · fetching fundamentals…":""}{ts?" · loaded "+new Date(ts).toLocaleString("en-AU",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):""}. Figures may be delayed; verify before trading.
+          </div>
         </div>
       )}
     </div>
