@@ -5,13 +5,15 @@
 //   POST /          → proxy a request to Anthropic          (gated by ACCESS_PASSWORD)
 //   GET/POST /library  → shared chain library (save/delete)  (gated by ACCESS_PASSWORD)
 //   GET/POST /glossary → shared saved-glossary library       (gated by ACCESS_PASSWORD)
+//   GET /market        → market data via Twelve Data         (gated by ACCESS_PASSWORD)
 //
-// Your Anthropic key is held server-side and never reaches any browser.
+// Your Anthropic and market-data keys are held server-side and never reach any browser.
 //
 // Set in the Cloudflare dashboard → your Worker → Settings:
 //   Secrets (Variables and Secrets):
 //     ANTHROPIC_API_KEY  — your Anthropic key (sk-ant-...)
 //     ACCESS_PASSWORD    — shared password to use the app, open saved chains, and save chains
+//     TWELVEDATA_KEY     — your free Twelve Data API key (for /market: charts + stats)
 //   Binding (KV namespace binding):
 //     Variable name: LIBRARY   →  bind to your KV namespace
 //   (optional) Plaintext variable:
@@ -66,6 +68,30 @@ export default {
         return json({ entries: sortEntries(map) }, 200, cors);
       }
       return json({ error: { message: "Method not allowed" } }, 405, cors);
+    }
+
+    // ── Market data (Twelve Data proxy; key kept server-side) ───────────────────
+    if (path === "/market") {
+      if (!accessOk) return json({ error: { message: "Wrong access password." } }, 401, cors);
+      if (!env.TWELVEDATA_KEY) return json({ error: { message: "Server has no TWELVEDATA_KEY secret. Add it under Settings -> Variables and Secrets, then Deploy." } }, 500, cors);
+      const u = new URL(request.url);
+      const EP = { quote:"quote", timeseries:"time_series", statistics:"statistics", profile:"profile" };
+      const ep = EP[u.searchParams.get("fn")];
+      const symbol = (u.searchParams.get("symbol") || "").trim();
+      if (!ep || !symbol) return json({ error: { message: "Bad market request (need fn + symbol)." } }, 400, cors);
+      const td = new URL("https://api.twelvedata.com/" + ep);
+      td.searchParams.set("symbol", symbol);
+      td.searchParams.set("apikey", env.TWELVEDATA_KEY);
+      if (ep === "time_series") {
+        td.searchParams.set("interval", u.searchParams.get("interval") || "1day");
+        td.searchParams.set("outputsize", u.searchParams.get("outputsize") || "250");
+      }
+      let body = "{}", status = 502;
+      try { const r = await fetch(td.toString()); body = await r.text(); status = r.status; }
+      catch { return json({ error: { message: "Could not reach the market-data provider." } }, 502, cors); }
+      const headers = new Headers(cors);
+      headers.set("Content-Type", "application/json");
+      return new Response(body, { status, headers });
     }
 
     // ── Anthropic proxy (default) ───────────────────────────────────────────────

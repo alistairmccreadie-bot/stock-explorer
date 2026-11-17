@@ -48,6 +48,7 @@ const STORAGE_KEYS = {
   panel:       "sx_last_panel",
   valuation:   "sx_last_valuation",
   glossaryLib: "sx_glossary_library",
+  market:      "sx_last_market",
   watchlist:   "sx_watchlist",
 };
 
@@ -212,6 +213,20 @@ async function callClaude(access, sys, usr, maxTokens, useSearch, onDelta, opts=
     return extractTextSources(data);
   }
   throw new Error(friendlyError(lastStatus, null));
+}
+
+// ─── MARKET DATA (Twelve Data via the proxy) ──────────────────────────────────
+// fn is one of: quote, timeseries, statistics, profile. Returns parsed JSON or throws.
+async function marketGet(access, fn, symbol, extra={}) {
+  const qs = new URLSearchParams({ fn, symbol, ...extra }).toString();
+  let res;
+  try { res = await fetch(PROXY_URL + "/market?" + qs, { headers:{ "x-access-code":access } }); }
+  catch { throw new Error("Network error reaching the market-data service."); }
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok) throw new Error(friendlyError(res.status, data.error));
+  // Twelve Data signals its own errors in the body: { status:"error", code, message }.
+  if (data && data.status === "error") throw new Error(data.message || "Market-data error.");
+  return data;
 }
 
 // ─── SHARED CHAIN LIBRARY (server-side, via the proxy) ────────────────────────
@@ -1920,8 +1935,172 @@ function GlossaryTab({ apiKey }) {
   );
 }
 
+// ─── PANEL: Price & Data ──────────────────────────────────────────────────────
+const fmtNum = v => { const n=Number(v); return isFinite(n) ? n.toLocaleString("en-US",{maximumFractionDigits:2}) : "n/a"; };
+const fmtX   = v => { const n=Number(v); return (isFinite(n)&&n) ? n.toFixed(1)+"x" : "n/a"; };
+const fmt2   = v => { const n=Number(v); return isFinite(n) ? n.toFixed(2) : "n/a"; };
+const fmtBig = (v,dollar) => { const n=Number(v); if(!isFinite(n)||!n) return "n/a"; const a=Math.abs(n), p=dollar?"$":""; if(a>=1e12) return p+(n/1e12).toFixed(2)+"T"; if(a>=1e9) return p+(n/1e9).toFixed(2)+"B"; if(a>=1e6) return p+(n/1e6).toFixed(2)+"M"; if(a>=1e3) return p+(n/1e3).toFixed(1)+"K"; return p+fmtNum(n); };
+const RANGES = { "1M":22, "3M":66, "6M":132, "1Y":252, "5Y":1300 };
+const toSeries = td => (td && Array.isArray(td.values)) ? td.values.map(v=>({t:v.datetime,c:Number(v.close)})).reverse().filter(p=>isFinite(p.c)) : [];
+
+function PriceChart({ points }) {
+  const [hi,setHi] = useState(null);
+  const ref = useRef(null);
+  if(!points || points.length<2) return <div style={{fontSize:13,color:"var(--text-dim)",padding:"20px 0"}}>No price history available.</div>;
+  const W=720,H=240,padL=8,padR=8,padT=14,padB=22, n=points.length;
+  const cs=points.map(p=>p.c), min=Math.min(...cs), max=Math.max(...cs), span=(max-min)||1;
+  const x=i=>padL+(i/(n-1))*(W-padL-padR);
+  const y=v=>padT+(1-(v-min)/span)*(H-padT-padB);
+  const up=cs[n-1]>=cs[0], hex=up?"#34d399":"#f87171", col=up?"var(--accent2)":"var(--danger)";
+  const line=points.map((p,i)=>(i?"L":"M")+x(i).toFixed(1)+","+y(p.c).toFixed(1)).join(" ");
+  const area=line+" L "+x(n-1).toFixed(1)+","+(H-padB)+" L "+x(0).toFixed(1)+","+(H-padB)+" Z";
+  const onMove=e=>{ const r=ref.current.getBoundingClientRect(); let i=Math.round(((e.clientX-r.left)/r.width)*(n-1)); setHi(Math.max(0,Math.min(n-1,i))); };
+  const h=hi!=null?points[hi]:null, chg0=h?((h.c-cs[0])/cs[0])*100:0;
+  return (
+    <div style={{position:"relative"}}>
+      <svg ref={ref} viewBox={"0 0 "+W+" "+H} width="100%" style={{display:"block",cursor:"crosshair"}} onMouseMove={onMove} onMouseLeave={()=>setHi(null)}>
+        <defs><linearGradient id="pcg" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor={hex} stopOpacity="0.28"/><stop offset="100%" stopColor={hex} stopOpacity="0"/>
+        </linearGradient></defs>
+        <path d={area} fill="url(#pcg)"/>
+        <path d={line} fill="none" stroke={col} strokeWidth="1.8"/>
+        <text x={padL} y={y(max)-3} fontSize="10" fill="var(--text-dim)">{fmtNum(max)}</text>
+        <text x={padL} y={y(min)+10} fontSize="10" fill="var(--text-dim)">{fmtNum(min)}</text>
+        <text x={padL} y={H-6} fontSize="10" fill="var(--text-dim)">{points[0].t}</text>
+        <text x={W-padR} y={H-6} fontSize="10" fill="var(--text-dim)" textAnchor="end">{points[n-1].t}</text>
+        <circle cx={x(n-1)} cy={y(cs[n-1])} r="3" fill={col}/>
+        {h&&<g><line x1={x(hi)} y1={padT} x2={x(hi)} y2={H-padB} stroke="var(--border)" strokeWidth="1"/><circle cx={x(hi)} cy={y(h.c)} r="3.5" fill={col} stroke="var(--bg)" strokeWidth="1.5"/></g>}
+      </svg>
+      {h&&(
+        <div style={{position:"absolute",top:0,right:0,background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:6,padding:"5px 10px",fontSize:12,pointerEvents:"none",whiteSpace:"nowrap"}}>
+          <span style={{color:"var(--text-muted)"}}>{h.t}</span>{"  "}<strong>{fmtNum(h.c)}</strong>{"  "}
+          <span style={{color:chg0>=0?"var(--accent2)":"var(--danger)"}}>{chg0>=0?"+":""}{chg0.toFixed(1)}%</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatTile({ label, value }) {
+  return (
+    <div style={{background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"10px 12px"}}>
+      <div style={{fontSize:11,color:"var(--text-dim)",marginBottom:3}}>{label}</div>
+      <div style={{fontSize:15,fontWeight:600,fontFamily:"Space Grotesk,sans-serif"}}>{value}</div>
+    </div>
+  );
+}
+
+function ChartPanel({ apiKey }) {
+  const saved=LS.get(STORAGE_KEYS.market);
+  const [ticker,setTicker]   = useState(saved?.ticker||"");
+  const [quote,setQuote]     = useState(saved?.quote||null);
+  const [series,setSeries]   = useState(saved?.series||null);
+  const [stats,setStats]     = useState(saved?.stats||null);
+  const [profile,setProfile] = useState(saved?.profile||null);
+  const [range,setRange]     = useState(saved?.range||"1Y");
+  const [ts,setTs]           = useState(saved?.ts||null);
+  const [loading,setLoading] = useState(false);
+  const [error,setError]     = useState(null);
+  const persist=(o)=>LS.set(STORAGE_KEYS.market,{ticker,quote,series,stats,profile,range,ts,...o});
+
+  const loadAll=useCallback(async(override,rng)=>{
+    const tk=((typeof override==="string"?override:ticker)||"").trim().toUpperCase();
+    if(!tk)return;
+    const rk=rng||range;
+    setLoading(true);setError(null);
+    try{
+      const [q,tsr,st,pr]=await Promise.allSettled([
+        marketGet(apiKey,"quote",tk),
+        marketGet(apiKey,"timeseries",tk,{outputsize:String(RANGES[rk])}),
+        marketGet(apiKey,"statistics",tk),
+        marketGet(apiKey,"profile",tk),
+      ]);
+      if(q.status!=="fulfilled") throw q.reason;
+      const qv=q.value, sv=tsr.status==="fulfilled"?toSeries(tsr.value):[], stv=st.status==="fulfilled"?st.value:null, prv=pr.status==="fulfilled"?pr.value:null;
+      const now=Date.now();
+      setTicker(tk);setQuote(qv);setSeries(sv);setStats(stv);setProfile(prv);setRange(rk);setTs(now);
+      LS.set(STORAGE_KEYS.market,{ticker:tk,quote:qv,series:sv,stats:stv,profile:prv,range:rk,ts:now});
+    }catch(e){setError(e.message);}finally{setLoading(false);}
+  },[ticker,apiKey,range]);
+  const pick=t=>loadAll(t);
+
+  const changeRange=useCallback(async(rk)=>{
+    setRange(rk);
+    if(!ticker){persist({range:rk});return;}
+    try{ const tsr=await marketGet(apiKey,"timeseries",ticker,{outputsize:String(RANGES[rk])}); const sv=toSeries(tsr); setSeries(sv); persist({range:rk,series:sv}); }
+    catch(e){ setError(e.message); }
+  },[ticker,apiKey,quote,stats,profile,ts]);
+
+  const vm = stats && stats.statistics && stats.statistics.valuations_metrics;
+  const up = quote && Number(quote.change)>=0;
+  return (
+    <div style={{padding:"28px 0"}}>
+      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Price &amp; Data</h2>
+      <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:24}}>Real price charts and verified key statistics for a stock, ETF or index — the hard numbers behind the research.</p>
+      <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
+        <input placeholder="e.g. NVDA, SPY" value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&loadAll()} maxLength={12}
+          style={{width:140,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
+        <StarToggle ticker={ticker}/>
+        <button onClick={loadAll} disabled={loading||!ticker.trim()}
+          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!ticker.trim()?"not-allowed":"pointer",opacity:loading||!ticker.trim()?.5:1}}>
+          {loading?"…":"Load"}
+        </button>
+      </div>
+      <Chips items={["NVDA","AAPL","MSFT","SPY","QQQ"]} onClick={t=>setTicker(t)} style={{marginBottom:16}}/>
+      <WatchlistBar onPick={pick}/>
+      {loading&&!quote&&<Loader label="Fetching market data…"/>}
+      {error&&<div style={{background:"#1e1010",border:"1px solid #4a1e1e",borderRadius:"var(--radius-sm)",color:"var(--danger)",padding:"14px 16px",fontSize:13}}>⚠️ {error}</div>}
+      {quote&&(
+        <div style={{marginTop:8}}>
+          {/* Header: price + change */}
+          <div style={{display:"flex",alignItems:"baseline",gap:14,flexWrap:"wrap",marginBottom:4}}>
+            <span style={{fontFamily:"Space Grotesk,sans-serif",fontSize:24,fontWeight:700}}>{quote.symbol}</span>
+            <span style={{fontSize:14,color:"var(--text-muted)"}}>{quote.name}</span>
+          </div>
+          <div style={{display:"flex",alignItems:"baseline",gap:12,flexWrap:"wrap",marginBottom:16}}>
+            <span style={{fontSize:30,fontWeight:700,fontFamily:"Space Grotesk,sans-serif"}}>{fmtNum(quote.close)} <span style={{fontSize:14,color:"var(--text-dim)",fontWeight:400}}>{quote.currency}</span></span>
+            <span style={{fontSize:16,fontWeight:600,color:up?"var(--accent2)":"var(--danger)"}}>{up?"▲ +":"▼ "}{fmtNum(quote.change)} ({up?"+":""}{fmt2(quote.percent_change)}%)</span>
+            <span style={{fontSize:12,color:"var(--text-dim)"}}>{quote.exchange} · as of {quote.datetime}{quote.is_market_open?" · open":""}</span>
+          </div>
+          {/* Range toggles */}
+          <div style={{display:"flex",gap:6,marginBottom:4}}>
+            {Object.keys(RANGES).map(rk=>(
+              <button key={rk} onClick={()=>changeRange(rk)}
+                style={{padding:"4px 12px",borderRadius:20,border:"1px solid "+(range===rk?"var(--accent)":"var(--border)"),background:range===rk?"var(--surface2)":"none",color:range===rk?"var(--accent)":"var(--text-muted)",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Inter,sans-serif"}}>{rk}</button>
+            ))}
+          </div>
+          <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"12px 14px",marginBottom:18}}>
+            <PriceChart points={series}/>
+          </div>
+          {/* Key stats */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10,marginBottom:18}}>
+            <StatTile label="Market cap" value={fmtBig(vm&&vm.market_capitalization,true)}/>
+            <StatTile label="Trailing P/E" value={fmtX(vm&&vm.trailing_pe)}/>
+            <StatTile label="Forward P/E" value={fmtX(vm&&vm.forward_pe)}/>
+            <StatTile label="PEG" value={fmt2(vm&&vm.peg_ratio)}/>
+            <StatTile label="P/S (TTM)" value={fmtX(vm&&vm.price_to_sales_ttm)}/>
+            <StatTile label="P/B" value={fmtX(vm&&vm.price_to_book_mrq)}/>
+            <StatTile label="52-week range" value={quote.fifty_two_week?quote.fifty_two_week.range:"n/a"}/>
+            <StatTile label="Day range" value={fmtNum(quote.low)+" – "+fmtNum(quote.high)}/>
+            <StatTile label="Volume" value={fmtBig(quote.volume)}/>
+            <StatTile label="Avg volume" value={fmtBig(quote.average_volume)}/>
+          </div>
+          {profile&&(profile.sector||profile.description)&&(
+            <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"16px 18px",fontSize:13,color:"var(--text-muted)",lineHeight:1.6}}>
+              {(profile.sector||profile.industry)&&<div style={{marginBottom:6,color:"var(--text)"}}><strong style={{fontFamily:"Space Grotesk,sans-serif"}}>{profile.sector}</strong>{profile.industry?" · "+profile.industry:""}{profile.employees?" · "+fmtBig(profile.employees)+" employees":""}</div>}
+              {profile.description&&<div>{profile.description.length>320?profile.description.slice(0,320)+"…":profile.description}</div>}
+            </div>
+          )}
+          <div style={{fontSize:11,color:"var(--text-dim)",marginTop:12}}>Data: Twelve Data{ts?" · loaded "+new Date(ts).toLocaleString("en-AU",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):""}. Figures may be delayed; verify before trading.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── APP ──────────────────────────────────────────────────────────────────────
 const NAV=[
+  {id:"chart",   label:"Price & Data",     icon:"📊"},
   {id:"movers",  label:"Why Did It Move?", icon:"📈"},
   {id:"research",label:"Company Research",  icon:"🔍"},
   {id:"valuation",label:"Valuation",        icon:"🏷️"},
@@ -1989,6 +2168,7 @@ function App() {
       {tab==="compare"  && <ComparePanel  apiKey={apiKey}/>}
       {tab==="chain"    && <ChainPanel    apiKey={apiKey}/>}
       {tab==="panel"    && <PanelTab      apiKey={apiKey}/>}
+      {tab==="chart"    && <ChartPanel    apiKey={apiKey}/>}
       {tab==="glossary" && <GlossaryTab apiKey={apiKey}/>}
 
       {/* Disclaimer */}
