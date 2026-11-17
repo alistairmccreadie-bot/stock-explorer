@@ -3,20 +3,20 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Stock Explorer — Investment Learning Tool</title>
+<title>Stock Explorer — Investment Research</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Sora:wght@500;600;700&display=swap" rel="stylesheet"/>
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{
-    --bg:#0d0f14;--surface:#161a23;--surface2:#1e2433;--border:#2a3147;
-    --accent:#4f8ef7;--accent2:#34d399;--accent3:#f59e0b;
-    --text:#e8eaf0;--text-muted:#8892a4;--text-dim:#5a6478;
-    --danger:#f87171;--success:#34d399;--radius:12px;--radius-sm:8px;
+    --bg:#0f1214;--surface:#181c20;--surface2:#20262b;--border:#2a3138;
+    --accent:#2dd4bf;--accent-btn:#0d9488;--accent2:#34d399;--accent3:#f0a93b;
+    --text:#eef2f3;--text-muted:#93a1a6;--text-dim:#6b7a80;
+    --danger:#fb7185;--success:#34d399;--radius:12px;--radius-sm:8px;
   }
   html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif}
   #root{min-height:100%}
@@ -57,7 +57,7 @@ const STORAGE_KEYS = {
 // Requests go to our own Worker, which holds the Anthropic key server-side and
 // checks a shared access password. The key is never present in the browser.
 const PROXY_URL = "https://stock-explorer-proxy.alistair-mccreadie.workers.dev";
-const BUILD = "2026-11-17 · markets";  // shown in the footer so you can confirm the live build
+const BUILD = "2026-11-17 · redesign";  // shown in the footer so you can confirm the live build
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
 // Model tiers — route each task to the right capability/cost point.
@@ -297,10 +297,10 @@ function ApiKeyGate({ onKey }) {
   return (
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
       <div style={{maxWidth:480,width:"100%",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:16,padding:40}}>
-        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:11,fontWeight:700,letterSpacing:".15em",textTransform:"uppercase",color:"var(--accent)",marginBottom:12}}>
-          Investment Learning Tool
+        <div style={{fontFamily:"Sora,sans-serif",fontSize:11,fontWeight:700,letterSpacing:".15em",textTransform:"uppercase",color:"var(--accent)",marginBottom:12}}>
+          Investment Research
         </div>
-        <h1 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:26,fontWeight:700,marginBottom:8,letterSpacing:"-.02em"}}>
+        <h1 style={{fontFamily:"Sora,sans-serif",fontSize:26,fontWeight:700,marginBottom:8,letterSpacing:"-.02em"}}>
           Stock <span style={{color:"var(--accent2)"}}>Explorer</span>
         </h1>
         <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.6,marginBottom:32}}>
@@ -322,7 +322,7 @@ function ApiKeyGate({ onKey }) {
         {err && <div style={{fontSize:12,color:"var(--danger)",marginBottom:12}}>{err}</div>}
 
         <button onClick={submit} disabled={testing||!val.trim()}
-          style={{width:"100%",background:"var(--accent)",color:"#fff",border:"none",borderRadius:8,padding:"11px 0",fontFamily:"Inter,sans-serif",fontSize:14,fontWeight:600,cursor:testing?"wait":"pointer",opacity:testing||!val.trim()?0.5:1,marginTop:8}}>
+          style={{width:"100%",background:"var(--accent-btn)",color:"#fff",border:"none",borderRadius:8,padding:"11px 0",fontFamily:"Inter,sans-serif",fontSize:14,fontWeight:600,cursor:testing?"wait":"pointer",opacity:testing||!val.trim()?0.5:1,marginTop:8}}>
           {testing ? "Checking…" : "Enter"}
         </button>
 
@@ -390,7 +390,7 @@ function WatchlistBar({ onPick, label }) {
       {list.map(t=>(
         <span key={t} style={{display:"inline-flex",alignItems:"center",gap:6,background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:20,padding:"4px 6px 4px 12px"}}>
           <button onClick={()=>onPick(t)} title="Load and run"
-            style={{background:"none",border:"none",color:"var(--text)",fontFamily:"Space Grotesk,sans-serif",fontSize:12,fontWeight:700,letterSpacing:".03em",cursor:"pointer",padding:0}}>{t}</button>
+            style={{background:"none",border:"none",color:"var(--text)",fontFamily:"Sora,sans-serif",fontSize:12,fontWeight:700,letterSpacing:".03em",cursor:"pointer",padding:0}}>{t}</button>
           <button onClick={()=>remove(t)} title="Remove"
             style={{background:"none",border:"none",color:"var(--text-dim)",fontSize:14,lineHeight:1,cursor:"pointer",padding:0}}>×</button>
         </span>
@@ -461,7 +461,7 @@ function GlossaryTerm({ term, def }) {
       <span onClick={()=>setOpen(o=>!o)} style={{borderBottom:"1px dotted var(--accent2)",cursor:"help"}}>{term}</span>
       {open&&(
         <span style={{position:"absolute",left:0,top:"100%",zIndex:30,marginTop:6,display:"block",width:250,background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 12px",fontSize:12,fontWeight:400,color:"var(--text)",lineHeight:1.5,boxShadow:"0 8px 24px rgba(0,0,0,.45)",whiteSpace:"normal",textTransform:"none",letterSpacing:"normal"}}>
-          <strong style={{color:"var(--accent2)",display:"block",marginBottom:4,fontFamily:"Space Grotesk,sans-serif"}}>{term}</strong>
+          <strong style={{color:"var(--accent2)",display:"block",marginBottom:4,fontFamily:"Sora,sans-serif"}}>{term}</strong>
           {def}
           <a onClick={learnMore} style={{display:"block",marginTop:8,color:"var(--accent)",cursor:"pointer",fontWeight:600}}>Learn more →</a>
           <span onClick={e=>{e.stopPropagation();setOpen(false);}} style={{position:"absolute",top:6,right:8,cursor:"pointer",color:"var(--text-dim)"}}>×</span>
@@ -515,7 +515,7 @@ function Sources({ sources }) {
   if (!sources || sources.length===0) return null;
   return (
     <div style={{marginTop:18,paddingTop:14,borderTop:"1px solid var(--border)"}}>
-      <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"var(--text-muted)",marginBottom:8}}>
+      <div style={{fontFamily:"Sora,sans-serif",fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"var(--text-muted)",marginBottom:8}}>
         Sources ({sources.length})
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:4}}>
@@ -556,7 +556,7 @@ function MdTable({ rows, kp, gloss }) {
       <table style={{borderCollapse:"collapse",width:"100%",fontSize:13,background:"var(--surface2)",borderRadius:"var(--radius-sm)",overflow:"hidden"}}>
         <thead>
           <tr>{head.map((c,i)=>(
-            <th key={i} style={{...cell,color:"var(--accent)",fontWeight:700,fontFamily:"Space Grotesk,sans-serif",fontSize:12,textTransform:"uppercase",letterSpacing:".04em",background:"var(--border)"}}>{renderInline(c,kp+"-h"+i,gloss)}</th>
+            <th key={i} style={{...cell,color:"var(--accent)",fontWeight:700,fontFamily:"Sora,sans-serif",fontSize:12,textTransform:"uppercase",letterSpacing:".04em",background:"var(--border)"}}>{renderInline(c,kp+"-h"+i,gloss)}</th>
           ))}</tr>
         </thead>
         <tbody>
@@ -591,8 +591,8 @@ function ParsedResult({ text, sources }) {
     }
 
     if (line.startsWith("### "))      els.push(<h4 key={k++} style={{fontSize:14,fontWeight:600,color:"var(--accent2)",margin:"14px 0 6px"}}>{renderInline(line.slice(4),k,gloss)}</h4>);
-    else if (line.startsWith("## "))  els.push(<h3 key={k++} style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:700,color:"var(--accent)",margin:"20px 0 8px",textTransform:"uppercase",letterSpacing:".05em"}}>{line.slice(3)}</h3>);
-    else if (line.startsWith("# "))   els.push(<h2 key={k++} style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,margin:"20px 0 10px",letterSpacing:"-.01em"}}>{line.slice(2)}</h2>);
+    else if (line.startsWith("## "))  els.push(<h3 key={k++} style={{fontFamily:"Sora,sans-serif",fontSize:14,fontWeight:700,color:"var(--accent)",margin:"20px 0 8px",textTransform:"uppercase",letterSpacing:".05em"}}>{line.slice(3)}</h3>);
+    else if (line.startsWith("# "))   els.push(<h2 key={k++} style={{fontFamily:"Sora,sans-serif",fontSize:20,fontWeight:700,margin:"20px 0 10px",letterSpacing:"-.01em"}}>{line.slice(2)}</h2>);
     else if (/^\*\*[^*]+\*\*$/.test(line)) els.push(<p key={k++} style={{fontSize:14,fontWeight:600,color:"var(--text)",margin:"8px 0"}}>{renderInline(line.slice(2,-2),k,gloss)}</p>);
     else if (line.startsWith("- ")||line.startsWith("• ")) els.push(<li key={k++} style={{fontSize:14,color:"var(--text)",margin:"5px 0 5px 16px",listStyle:"none",position:"relative"}}><span style={{position:"absolute",left:-16,color:"var(--text-dim)"}}>—</span>{renderInline(line.slice(2),k,gloss)}</li>);
     else if (/^\d+\./.test(line))     els.push(<li key={k++} style={{fontSize:14,color:"var(--text)",margin:"5px 0 5px 16px",listStyle:"none",position:"relative"}}><span style={{position:"absolute",left:-16,color:"var(--accent3)"}}>›</span>{renderInline(line.replace(/^\d+\.\s*/,""),k,gloss)}</li>);
@@ -701,11 +701,11 @@ function FlowDiagram({ stages, edges }) {
 
   return (
     <div style={{marginTop:24,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:24}}>
-      <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:13,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"var(--text-muted)",marginBottom:6}}>
+      <div style={{fontFamily:"Sora,sans-serif",fontSize:13,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"var(--text-muted)",marginBottom:6}}>
         Value Chain Flow Diagram
       </div>
       <p style={{fontSize:12,color:"var(--text-dim)",marginBottom:18,lineHeight:1.5}}>
-        Click any stage to highlight its connections. Dashed arrows = secondary paths. ⭐ = good starting point for a new investor.
+        Click any stage to highlight its connections. Dashed arrows = secondary paths. ⭐ = most accessible / most liquid entry point.
         Stages in the same column are parallel alternatives, not sequential steps.
       </p>
       <div style={{overflowX:"auto",paddingBottom:12}}>
@@ -750,11 +750,11 @@ function FlowDiagram({ stages, edges }) {
 
                   {/* Number badge */}
                   <circle cx={x+16} cy={y+16} r="11" fill={isA?"#f59e0b":col} opacity={isD?.15:1}/>
-                  <text x={x+16} y={y+20} textAnchor="middle" fill="#fff" fontSize="10" fontFamily="Space Grotesk,sans-serif" fontWeight="700" opacity={isD?.15:1}>{i+1}</text>
+                  <text x={x+16} y={y+20} textAnchor="middle" fill="#fff" fontSize="10" fontFamily="Sora,sans-serif" fontWeight="700" opacity={isD?.15:1}>{i+1}</text>
 
                   {/* Stage name */}
                   <foreignObject x={x+6} y={y+30} width={NODE_W-12} height={28}>
-                    <div xmlns="http://www.w3.org/1999/xhtml" style={{fontSize:11,fontFamily:"Space Grotesk,sans-serif",fontWeight:700,color:isA?"#f59e0b":"#e8eaf0",lineHeight:1.3,overflow:"hidden",maxHeight:28,opacity:isD?.15:1}}>
+                    <div xmlns="http://www.w3.org/1999/xhtml" style={{fontSize:11,fontFamily:"Sora,sans-serif",fontWeight:700,color:isA?"#f59e0b":"#e8eaf0",lineHeight:1.3,overflow:"hidden",maxHeight:28,opacity:isD?.15:1}}>
                       {s.name}
                     </div>
                   </foreignObject>
@@ -770,7 +770,7 @@ function FlowDiagram({ stages, edges }) {
                   <foreignObject x={x+6} y={y+86} width={NODE_W-12} height={28}>
                     <div xmlns="http://www.w3.org/1999/xhtml" style={{display:"flex",flexWrap:"wrap",gap:3,opacity:isD?.15:1}}>
                       {companies.map((c,ci)=>(
-                        <span key={ci} style={{fontSize:9,fontFamily:"Space Grotesk,sans-serif",fontWeight:700,padding:"1px 5px",borderRadius:3,border:"1px solid "+(isA?"#f59e0b":col),color:"#e8eaf0",background:"rgba(79,142,247,.1)",letterSpacing:".02em"}}>{c}</span>
+                        <span key={ci} style={{fontSize:9,fontFamily:"Sora,sans-serif",fontWeight:700,padding:"1px 5px",borderRadius:3,border:"1px solid "+(isA?"#f59e0b":col),color:"#e8eaf0",background:"rgba(79,142,247,.1)",letterSpacing:".02em"}}>{c}</span>
                       ))}
                     </div>
                   </foreignObject>
@@ -791,10 +791,10 @@ function FlowDiagram({ stages, edges }) {
       </div>
       {active!==null&&(
         <div style={{display:"flex",flexWrap:"wrap",gap:16,marginTop:16,padding:"10px 14px",background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",fontSize:12}}>
-          <span style={{color:"#f59e0b",fontWeight:600,fontFamily:"Space Grotesk,sans-serif"}}>● {stages[active].name}</span>
+          <span style={{color:"#f59e0b",fontWeight:600,fontFamily:"Sora,sans-serif"}}>● {stages[active].name}</span>
           {out[active].length>0&&<span style={{color:"var(--text-muted)"}}>→ Feeds into: {out[active].map(v=>stages[v].name).join(", ")}</span>}
           {inc[active].length>0&&<span style={{color:"var(--text-muted)"}}>← Receives from: {inc[active].map(v=>stages[v].name).join(", ")}</span>}
-          {stages[active].beginner&&<span style={{color:"#f59e0b"}}>⭐ Good starting point for new investors</span>}
+          {stages[active].beginner&&<span style={{color:"#f59e0b"}}>⭐ Most accessible / liquid entry point</span>}
         </div>
       )}
     </div>
@@ -823,7 +823,7 @@ function MoverPanel({ apiKey }) {
     try{
       const pd=dateFrom&&dateTo?"from "+dateFrom+" to "+dateTo:dateFrom?"from "+dateFrom+" to today":dateTo?"up to "+dateTo:"over the past month";
       const sys=buildSys(
-        "You are a patient investment educator helping a young adult (18+) learn to invest. You are explaining why a stock's price moved over a period.",
+        "You are a sharp equity analyst explaining, in clear plain English for a self-directed investor, why a stock's price moved over a period.",
         [
           {h:"What Happened", d:"1-2 sentences summarising the overall move and its size (% change, key price levels)."},
           {h:"Timeline of Key Events", d:"A Markdown table, columns: | Date | Event | Effect on price |. Include the 4-7 most important dated events in the period."},
@@ -842,7 +842,7 @@ function MoverPanel({ apiKey }) {
 
   return (
     <div style={{padding:"28px 0"}}>
-      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Why Did It Move?</h2>
+      <h2 style={{fontFamily:"Sora,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Why Did It Move?</h2>
       <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:24}}>Enter a ticker and date range to understand what drove the price — a single day, a quarter, or a full year.</p>
       <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
         <input placeholder="e.g. NVDA" value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&analyse()} maxLength={10}
@@ -855,7 +855,7 @@ function MoverPanel({ apiKey }) {
         <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)}
           style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none"}}/>
         <button onClick={analyse} disabled={loading||!ticker.trim()}
-          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!ticker.trim()?"not-allowed":"pointer",opacity:loading||!ticker.trim()?.5:1}}>
+          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent-btn)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!ticker.trim()?"not-allowed":"pointer",opacity:loading||!ticker.trim()?.5:1}}>
           {loading?"…":"Analyse"}
         </button>
       </div>
@@ -886,7 +886,7 @@ function ResearchPanel({ apiKey }) {
     setLoading(true);setError(null);setResult(null);setSources(null);setTs(null);
     try{
       const sys=buildSys(
-        "You are a patient investment educator helping an 18-year-old learn to invest. You are profiling a company as a potential investment.",
+        "You are an equity analyst profiling a company as a potential investment for a self-directed investor, in clear plain English.",
         [
           {h:"What the Company Does", d:"2-4 sentences."},
           {h:"How It Makes Money", d:"2-4 sentences on the business model and main revenue sources."},
@@ -908,14 +908,14 @@ function ResearchPanel({ apiKey }) {
 
   return (
     <div style={{padding:"28px 0"}}>
-      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Company Research</h2>
+      <h2 style={{fontFamily:"Sora,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Company Research</h2>
       <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:24}}>Build a full picture of any company — what it does, how it makes money, its financials, rivals, and risks.</p>
       <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
         <input placeholder="e.g. AAPL" value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&research()} maxLength={10}
           style={{width:130,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
         <StarToggle ticker={ticker}/>
         <button onClick={research} disabled={loading||!ticker.trim()}
-          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!ticker.trim()?"not-allowed":"pointer",opacity:loading||!ticker.trim()?.5:1}}>
+          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent-btn)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!ticker.trim()?"not-allowed":"pointer",opacity:loading||!ticker.trim()?.5:1}}>
           {loading?"…":"Research"}
         </button>
       </div>
@@ -946,7 +946,7 @@ function ComparePanel({ apiKey }) {
     setLoading(true);setError(null);setResult(null);setSources(null);setTs(null);
     try{
       const sys=buildSys(
-        "You are a patient investment educator helping an 18-year-old compare two stocks: "+A+" and "+B+".",
+        "You are an equity analyst comparing two stocks for a self-directed investor, in clear plain English: "+A+" and "+B+".",
         [
           {h:"Snapshot", d:"A Markdown table, columns: | Metric | "+A+" | "+B+" |, with rows for Market cap, Revenue (latest FY), Revenue growth, Gross margin, Operating margin, Net income, P/E, P/S, and Free cash flow."},
           {h:"Business Models", d:"2-4 sentences contrasting how each company makes money."},
@@ -968,18 +968,18 @@ function ComparePanel({ apiKey }) {
   const PAIRS=[["NVDA","AMD"],["AAPL","MSFT"],["TSLA","RIVN"]];
   return (
     <div style={{padding:"28px 0"}}>
-      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Compare Stocks</h2>
+      <h2 style={{fontFamily:"Sora,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Compare Stocks</h2>
       <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:24}}>Put two companies head-to-head on financials, valuation, competitive position, and risk.</p>
       <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
         <input placeholder="Ticker A" value={tickerA} onChange={e=>setTickerA(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&compare()} maxLength={10}
           style={{width:120,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
         <StarToggle ticker={tickerA}/>
-        <span style={{fontFamily:"Space Grotesk,sans-serif",fontSize:12,fontWeight:700,color:"var(--text-dim)",letterSpacing:".1em"}}>VS</span>
+        <span style={{fontFamily:"Sora,sans-serif",fontSize:12,fontWeight:700,color:"var(--text-dim)",letterSpacing:".1em"}}>VS</span>
         <input placeholder="Ticker B" value={tickerB} onChange={e=>setTickerB(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&compare()} maxLength={10}
           style={{width:120,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
         <StarToggle ticker={tickerB}/>
         <button onClick={compare} disabled={loading||!tickerA.trim()||!tickerB.trim()}
-          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!tickerA.trim()||!tickerB.trim()?"not-allowed":"pointer",opacity:loading||!tickerA.trim()||!tickerB.trim()?.5:1}}>
+          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent-btn)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!tickerA.trim()||!tickerB.trim()?"not-allowed":"pointer",opacity:loading||!tickerA.trim()||!tickerB.trim()?.5:1}}>
           {loading?"…":"Compare"}
         </button>
       </div>
@@ -1055,7 +1055,7 @@ function ChainPanel({ apiKey }) {
       const structSys=[
         "You are a financial analyst. Return ONLY a valid JSON object — no markdown, no explanation.",
         "The object must have two keys:",
-        "\"stages\": array of objects. Each: { id (integer 0-based), name (string), what (string, one sentence max 15 words), companies (array of 3-5 real listed ticker strings), margin (string e.g. Low 5-8%), beginner (boolean — true for the 1-2 stages that are the most transparent, liquid, and easiest to understand for a first-time investor) }.",
+        "\"stages\": array of objects. Each: { id (integer 0-based), name (string), what (string, one sentence max 15 words), companies (array of 3-5 real listed ticker strings), margin (string e.g. Low 5-8%), beginner (boolean — true for the 1-2 stages that are the most transparent, liquid, and easiest to analyse) }.",
         "\"edges\": array of directed flow objects. Each: { from (integer stage id), to (integer stage id), secondary (boolean, true if less common path) }.",
         "Edges must capture REAL branching flow — a stage can have multiple outgoing and incoming edges.",
         "Do NOT just chain stages 0->1->2->3 linearly unless that is genuinely how the industry works.",
@@ -1080,7 +1080,7 @@ function ChainPanel({ apiKey }) {
       const stageList=parsedData ? parsedData.stages.map(s=>"Stage "+(s.id+1)+": "+s.name).join(" | ") : "";
       setLoadingStep("Researching all stages and writing analysis…");
       const writtenSys=[
-        "You are an investment educator writing for an 18-year-old learning to invest.",
+        "You are an equity analyst writing for a self-directed investor, in clear plain English.",
         "The canonical stage list for the "+industry+" industry is:",
         stageList,
         "",
@@ -1136,7 +1136,7 @@ function ChainPanel({ apiKey }) {
     try{
       const T=tk.toUpperCase();
       const sys=buildSys(
-        "You are helping a young investor evaluate "+T+" as part of the "+industry+" value chain.",
+        "You are helping a self-directed investor evaluate "+T+" as part of the "+industry+" value chain.",
         [
           {h:"Where "+T+" Sits in the Chain", d:"2-4 sentences."},
           {h:"Why This Position Is (or Isn't) Attractive", d:"2-4 sentences."},
@@ -1155,14 +1155,14 @@ function ChainPanel({ apiKey }) {
 
   return (
     <div style={{padding:"28px 0"}}>
-      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Industry Chain Explorer</h2>
+      <h2 style={{fontFamily:"Sora,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Industry Chain Explorer</h2>
       <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:24}}>Map the full value chain — raw materials to end product — and find where the real investment opportunities sit.</p>
       <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
         <input placeholder="e.g. Semiconductors, Electric Vehicles, Pharmaceuticals"
           value={industry} onChange={e=>setIndustry(e.target.value)} onKeyDown={e=>e.key==="Enter"&&exploreChain()}
           style={{flex:1,minWidth:240,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none"}}/>
         <button onClick={exploreChain} disabled={loading||!industry.trim()}
-          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!industry.trim()?"not-allowed":"pointer",opacity:loading||!industry.trim()?.5:1}}>
+          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent-btn)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!industry.trim()?"not-allowed":"pointer",opacity:loading||!industry.trim()?.5:1}}>
           {loading?"…":(inLib?"Refresh Chain":"Explore Chain")}
         </button>
       </div>
@@ -1205,7 +1205,7 @@ function ChainPanel({ apiKey }) {
           <ParsedResult text={result} sources={sources}/>
           {ts&&(
           <div style={{marginTop:32,background:"var(--surface2)",border:"1px solid var(--border)",borderLeft:"3px solid var(--accent3)",borderRadius:"var(--radius)",padding:"24px 28px"}}>
-            <h3 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:700,marginBottom:6}}>🔎 Drill into a Company from This Chain</h3>
+            <h3 style={{fontFamily:"Sora,sans-serif",fontSize:16,fontWeight:700,marginBottom:6}}>🔎 Drill into a Company from This Chain</h3>
             <p style={{fontSize:13,color:"var(--text-muted)",marginBottom:16}}>Spotted a company above? Enter its ticker for a focused deep-dive.</p>
             <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
               <input placeholder="e.g. ASML" value={focusTicker} onChange={e=>setFocusTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&drillDown()} maxLength={10}
@@ -1238,9 +1238,9 @@ const PANEL = [
 function panelSys(mode) {
   const roster = PANEL.map(a=>"- "+a.name+": "+a.style).join("\n");
   const head = [
-    "You are the moderator of a panel of investment analysts helping an 18-year-old learn to invest.",
+    "You are the moderator of a panel of investment analysts briefing a self-directed investor.",
     "Each analyst below has a distinct, consistent investing style. Stay fully in character for each — let them genuinely disagree where their styles differ.",
-    "Be specific: use real tickers and real, recent figures (search the web). Explain any jargon in plain English. This is educational, NOT financial advice.",
+    "Be specific: use real tickers and real, recent figures (search the web). Explain any jargon in plain English. This is for research, NOT financial advice.",
     "",
     "VALUATION IS CENTRAL: every analyst must ground their view in valuation. For each stock, compare its current multiples (P/E, EV/EBITDA, P/S — whichever fit) to BOTH its industry/peers AND its own history. Then explicitly address the key dynamic:",
     "- If it trades at a PREMIUM: can it grow into that multiple? Quantify roughly the earnings growth needed and judge how realistic that is, with the main risk if it doesn't.",
@@ -1313,7 +1313,7 @@ function PanelTab({ apiKey }) {
 
   return (
     <div style={{padding:"28px 0"}}>
-      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Analyst Panel</h2>
+      <h2 style={{fontFamily:"Sora,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Analyst Panel</h2>
       <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:16}}>Four analysts with different styles — value, tech growth, quant, and growth-at-a-reasonable-price — generate ideas or stress-test your thesis, then a Panel Chair sums up.</p>
 
       <div style={{display:"flex",gap:8,marginBottom:18}}>
@@ -1328,7 +1328,7 @@ function PanelTab({ apiKey }) {
               value={focus} onChange={e=>setFocus(e.target.value)} onKeyDown={e=>e.key==="Enter"&&run()}
               style={{flex:1,minWidth:260,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none"}}/>
             <button onClick={run} disabled={!canRun}
-              style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:canRun?"pointer":"not-allowed",opacity:canRun?1:.5}}>
+              style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent-btn)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:canRun?"pointer":"not-allowed",opacity:canRun?1:.5}}>
               {loading?"…":"Convene Panel"}
             </button>
           </div>
@@ -1341,7 +1341,7 @@ function PanelTab({ apiKey }) {
             style={{width:"100%",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",resize:"vertical",lineHeight:1.5,marginBottom:12}}/>
           <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:24}}>
             <button onClick={run} disabled={!canRun}
-              style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:canRun?"pointer":"not-allowed",opacity:canRun?1:.5}}>
+              style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent-btn)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:canRun?"pointer":"not-allowed",opacity:canRun?1:.5}}>
               {loading?"…":"Convene Panel"}
             </button>
             <Chips items={["Apple is now a services company, not a hardware company","Lithium miners are a value trap","Cybersecurity is the most durable software theme"]} label="Examples:" onClick={v=>setThesis(v)} style={{marginBottom:0}}/>
@@ -1374,7 +1374,7 @@ function ValuationPanel({ apiKey }) {
     try{
       const T=tk.toUpperCase();
       const sys=buildSys(
-        "You are an investment educator helping an 18-year-old judge whether a stock is cheaply or expensively valued versus its industry and its own history. Be specific with real, recent numbers and clearly name the sector/peer group you compare against.",
+        "You are an equity analyst helping a self-directed investor judge whether a stock is cheaply or expensively valued versus its industry and its own history. Be specific with real, recent numbers and clearly name the sector/peer group you compare against.",
         [
           {h:"Where "+T+" Trades Today", d:"A Markdown table with columns: | Metric | "+T+" now | "+T+" 5-yr avg | Industry now | Industry 5-yr avg |. Rows: the most relevant of Forward P/E, P/E, P/S, EV/EBITDA, P/B, PEG, Dividend yield. Use \"n/a\" where a metric doesn't apply or isn't available."},
           {h:"Read on the Multiple", d:"Begin by naming the industry / peer group used. Then 2-4 sentences: is "+T+" cheap or expensive versus its industry and versus its own history, and what justifies any premium or discount (growth, margins, quality, risk)?"},
@@ -1393,14 +1393,14 @@ function ValuationPanel({ apiKey }) {
 
   return (
     <div style={{padding:"28px 0"}}>
-      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Valuation</h2>
+      <h2 style={{fontFamily:"Sora,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Valuation</h2>
       <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:24}}>See a stock's valuation multiples against its industry and its own history — and exactly what would have to happen for it to reach a fairer value.</p>
       <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
         <input placeholder="e.g. NVDA" value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&analyse()} maxLength={10}
           style={{width:130,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
         <StarToggle ticker={ticker}/>
         <button onClick={analyse} disabled={loading||!ticker.trim()}
-          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!ticker.trim()?"not-allowed":"pointer",opacity:loading||!ticker.trim()?.5:1}}>
+          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent-btn)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!ticker.trim()?"not-allowed":"pointer",opacity:loading||!ticker.trim()?.5:1}}>
           {loading?"…":"Check Valuation"}
         </button>
       </div>
@@ -1871,7 +1871,7 @@ function GlossaryTab({ apiKey }) {
     setAskLoading(true);setAskError(null);setAskResult(null);
     setTimeout(()=>{ if(askRef.current) askRef.current.scrollIntoView({behavior:"smooth",block:"start"}); },60);
     try{
-      const sys="You are an investment educator writing ONE glossary entry for an 18-year-old learning to invest.\n"+
+      const sys="You are an investment analyst writing ONE clear, plain-English glossary entry for a self-directed investor.\n"+
         "FIRST output a single line exactly in the form: CATEGORY: X — where X is the ONE best-fit category from this list: "+GLOSSARY_CATS.join(" | ")+".\n"+
         "THEN, on the following lines, explain the term using EXACTLY these bold-labelled sections, each on its own line: **What it is**, **How to read it**, **Worked example** (use real illustrative numbers; a small Markdown table is good when it helps), **Watch out for**.\n"+
         "Keep it balanced and plain-English; explain any jargon. If the term isn't a finance/investing concept, still give the CATEGORY line (use Quality & concepts) then say in one line that it isn't a finance term.";
@@ -1912,7 +1912,7 @@ function GlossaryTab({ apiKey }) {
         <div onClick={()=>setOpen(isOpen?null:e.term)}
           style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,background:"var(--surface)",border:"1px solid "+(isOpen?"var(--accent)":"var(--border)"),borderRadius:"var(--radius-sm)",padding:"12px 16px",cursor:"pointer"}}>
           <span style={{fontSize:14,color:"var(--text)"}}>
-            <strong style={{fontFamily:"Space Grotesk,sans-serif",fontWeight:700}}>{e.term}</strong>
+            <strong style={{fontFamily:"Sora,sans-serif",fontWeight:700}}>{e.term}</strong>
             {e.short&&<span style={{color:"var(--text-muted)"}}> — {e.short}</span>}
             {isSaved&&<span style={{marginLeft:8,fontSize:10,fontWeight:700,color:"var(--accent2)",border:"1px solid var(--border)",borderRadius:10,padding:"1px 6px",whiteSpace:"nowrap"}}>saved</span>}
           </span>
@@ -1928,7 +1928,7 @@ function GlossaryTab({ apiKey }) {
 
   return (
     <div style={{padding:"28px 0"}}>
-      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Glossary</h2>
+      <h2 style={{fontFamily:"Sora,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Glossary</h2>
       <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:18}}>Plain-English deep-dives on the key terms used to analyse stocks and industries — what each means, how to read it, a worked example, and the traps to avoid.</p>
       <input placeholder="Search terms… (e.g. PEG, margin, moat)" value={q} onChange={e=>setQ(e.target.value)}
         style={{width:"100%",maxWidth:360,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",marginBottom:8}}/>
@@ -1938,7 +1938,7 @@ function GlossaryTab({ apiKey }) {
         if(!curatedItems.length&&!savedItems.length) return null;
         return (
           <div key={cat} style={{marginTop:22}}>
-            <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"var(--accent3)",marginBottom:10}}>{cat}</div>
+            <div style={{fontFamily:"Sora,sans-serif",fontSize:12,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"var(--accent3)",marginBottom:10}}>{cat}</div>
             {curatedItems.map(e=>renderEntry(e,false))}
             {savedItems.map(e=>renderEntry(e,true))}
           </div>
@@ -1948,13 +1948,13 @@ function GlossaryTab({ apiKey }) {
 
       {/* AI: explain any other term */}
       <div ref={askRef} style={{marginTop:34,paddingTop:24,borderTop:"1px solid var(--border)",scrollMarginTop:12}}>
-        <h3 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:700,marginBottom:6}}>🤖 Explain another term</h3>
+        <h3 style={{fontFamily:"Sora,sans-serif",fontSize:16,fontWeight:700,marginBottom:6}}>🤖 Explain another term</h3>
         <p style={{fontSize:13,color:"var(--text-muted)",marginBottom:14}}>Not in the list above? Type any investing term or concept and get a full explanation in the same style. It's saved to your shared glossary above, so the library grows over time.</p>
         <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
           <input placeholder="e.g. short selling, beta, working capital" value={askTerm} onChange={e=>setAskTerm(e.target.value)} onKeyDown={e=>e.key==="Enter"&&ask()}
             style={{flex:1,minWidth:240,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none"}}/>
           <button onClick={ask} disabled={askLoading||!askTerm.trim()}
-            style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:askLoading||!askTerm.trim()?"not-allowed":"pointer",opacity:askLoading||!askTerm.trim()?.5:1}}>
+            style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent-btn)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:askLoading||!askTerm.trim()?"not-allowed":"pointer",opacity:askLoading||!askTerm.trim()?.5:1}}>
             {askLoading?"…":"Explain"}
           </button>
         </div>
@@ -2016,7 +2016,7 @@ function StatTile({ label, value }) {
   return (
     <div style={{background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"10px 12px"}}>
       <div style={{fontSize:11,color:"var(--text-dim)",marginBottom:3}}>{label}</div>
-      <div style={{fontSize:15,fontWeight:600,fontFamily:"Space Grotesk,sans-serif"}}>{value}</div>
+      <div style={{fontSize:15,fontWeight:600,fontFamily:"Sora,sans-serif"}}>{value}</div>
     </div>
   );
 }
@@ -2099,14 +2099,14 @@ function ChartPanel({ apiKey }) {
   const stat = (val, fmt) => (val!=null && val!=="" && isFinite(Number(val))) ? fmt(val) : (fundLoading && !fund ? "…" : "n/a");
   return (
     <div style={{padding:"28px 0"}}>
-      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Price &amp; Data</h2>
+      <h2 style={{fontFamily:"Sora,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Price &amp; Data</h2>
       <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:24}}>Real price charts and verified key statistics for a stock, ETF or index — the hard numbers behind the research.</p>
       <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
         <input placeholder="e.g. NVDA, SPY" value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&loadAll()} maxLength={12}
           style={{width:140,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
         <StarToggle ticker={ticker}/>
         <button onClick={loadAll} disabled={loading||!ticker.trim()}
-          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!ticker.trim()?"not-allowed":"pointer",opacity:loading||!ticker.trim()?.5:1}}>
+          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent-btn)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!ticker.trim()?"not-allowed":"pointer",opacity:loading||!ticker.trim()?.5:1}}>
           {loading?"…":"Load"}
         </button>
       </div>
@@ -2118,11 +2118,11 @@ function ChartPanel({ apiKey }) {
         <div style={{marginTop:8}}>
           {/* Header: price + change */}
           <div style={{display:"flex",alignItems:"baseline",gap:14,flexWrap:"wrap",marginBottom:4}}>
-            <span style={{fontFamily:"Space Grotesk,sans-serif",fontSize:24,fontWeight:700}}>{quote.symbol}</span>
+            <span style={{fontFamily:"Sora,sans-serif",fontSize:24,fontWeight:700}}>{quote.symbol}</span>
             <span style={{fontSize:14,color:"var(--text-muted)"}}>{quote.name}</span>
           </div>
           <div style={{display:"flex",alignItems:"baseline",gap:12,flexWrap:"wrap",marginBottom:16}}>
-            <span style={{fontSize:30,fontWeight:700,fontFamily:"Space Grotesk,sans-serif"}}>{fmtNum(quote.close)} <span style={{fontSize:14,color:"var(--text-dim)",fontWeight:400}}>{quote.currency}</span></span>
+            <span style={{fontSize:30,fontWeight:700,fontFamily:"Sora,sans-serif"}}>{fmtNum(quote.close)} <span style={{fontSize:14,color:"var(--text-dim)",fontWeight:400}}>{quote.currency}</span></span>
             <span style={{fontSize:15,fontWeight:600,color:up?"var(--accent2)":"var(--danger)"}}>{up?"▲ +":"▼ "}{fmtNum(quote.change)} ({up?"+":""}{fmt2(quote.percent_change)}%) <span style={{color:"var(--text-dim)",fontWeight:400,fontSize:12}}>today</span></span>
             {periodPct!=null&&<span style={{fontSize:15,fontWeight:600,color:periodUp?"var(--accent2)":"var(--danger)"}}>{periodUp?"▲ +":"▼ "}{fmt2(periodPct)}% <span style={{color:"var(--text-dim)",fontWeight:400,fontSize:12}}>{range}</span></span>}
           </div>
@@ -2152,7 +2152,7 @@ function ChartPanel({ apiKey }) {
           </div>
           {info&&(info.sector||info.summary)&&(
             <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"16px 18px",fontSize:13,color:"var(--text-muted)",lineHeight:1.6}}>
-              {(info.sector||info.industry)&&<div style={{marginBottom:6,color:"var(--text)"}}><strong style={{fontFamily:"Space Grotesk,sans-serif"}}>{info.sector}</strong>{info.industry?" · "+info.industry:""}{info.employees?" · "+fmtBig(info.employees)+" employees":""}</div>}
+              {(info.sector||info.industry)&&<div style={{marginBottom:6,color:"var(--text)"}}><strong style={{fontFamily:"Sora,sans-serif"}}>{info.sector}</strong>{info.industry?" · "+info.industry:""}{info.employees?" · "+fmtBig(info.employees)+" employees":""}</div>}
               {info.summary&&<div>{info.summary.length>320?info.summary.slice(0,320)+"…":info.summary}</div>}
             </div>
           )}
@@ -2168,7 +2168,7 @@ function ChartPanel({ apiKey }) {
 // ─── PANEL: Markets (indices/ETFs + macro) ────────────────────────────────────
 function marketsIndexSys() {
   return buildSys(
-    "You are an investment educator explaining an index or ETF to an 18-year-old learning to invest. Be specific with real holdings, weights and figures (search the web).",
+    "You are an investment analyst explaining an index or ETF to a self-directed investor, in clear plain English. Be specific with real holdings, weights and figures (search the web).",
     [
       {h:"What It Tracks", d:"1-2 sentences: what it holds and its strategy, and roughly how many holdings."},
       {h:"Top Holdings", d:"A Markdown table, columns: | Holding | Ticker | Weight % |. The 8-10 largest holdings with approximate current weights."},
@@ -2181,7 +2181,7 @@ function marketsIndexSys() {
 }
 function marketsMacroSys() {
   return buildSys(
-    "You are a macro strategist giving an 18-year-old a current, plain-English snapshot of the market backdrop. Use the latest real figures (search the web) and state them clearly; explain any jargon.",
+    "You are a macro strategist giving a self-directed investor a current, plain-English snapshot of the market backdrop. Use the latest real figures (search the web) and state them clearly; explain any jargon.",
     [
       {h:"The Big Picture", d:"3-4 sentences on the current backdrop — growth, inflation, the direction of interest rates, and market mood."},
       {h:"Rates & Inflation", d:"A Markdown table, columns: | Indicator | Latest |, rows: Fed funds rate, US 10-year Treasury yield, US 2-year yield, 10y–2y spread, CPI inflation (YoY), Core PCE (YoY), Unemployment rate."},
@@ -2254,7 +2254,7 @@ function MarketsPanel({ apiKey }) {
 
   return (
     <div style={{padding:"28px 0"}}>
-      <h2 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Markets</h2>
+      <h2 style={{fontFamily:"Sora,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Markets</h2>
       <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:16}}>Look inside an index or ETF — what it holds and what moves it — or get a plain-English snapshot of the macro backdrop.</p>
       <div style={{display:"flex",gap:8,marginBottom:18}}>
         {tabBtn("index","📈 Index / ETF")}
@@ -2268,7 +2268,7 @@ function MarketsPanel({ apiKey }) {
               style={{width:160,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
             <StarToggle ticker={symbol}/>
             <button onClick={runIndex} disabled={loading||!symbol.trim()}
-              style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!symbol.trim()?"not-allowed":"pointer",opacity:loading||!symbol.trim()?.5:1}}>
+              style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent-btn)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!symbol.trim()?"not-allowed":"pointer",opacity:loading||!symbol.trim()?.5:1}}>
               {loading?"…":"Analyse"}
             </button>
           </div>
@@ -2277,8 +2277,8 @@ function MarketsPanel({ apiKey }) {
           {quote&&(
             <div style={{marginBottom:14}}>
               <div style={{display:"flex",alignItems:"baseline",gap:12,flexWrap:"wrap",marginBottom:8}}>
-                <span style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700}}>{quote.symbol}</span>
-                <span style={{fontSize:22,fontWeight:700,fontFamily:"Space Grotesk,sans-serif"}}>{fmtNum(quote.close)}</span>
+                <span style={{fontFamily:"Sora,sans-serif",fontSize:20,fontWeight:700}}>{quote.symbol}</span>
+                <span style={{fontSize:22,fontWeight:700,fontFamily:"Sora,sans-serif"}}>{fmtNum(quote.close)}</span>
                 <span style={{fontSize:14,fontWeight:600,color:up?"var(--accent2)":"var(--danger)"}}>{up?"▲ +":"▼ "}{fmt2(quote.percent_change)}% <span style={{color:"var(--text-dim)",fontWeight:400,fontSize:12}}>today</span></span>
                 {periodPct!=null&&<span style={{fontSize:14,fontWeight:600,color:periodUp?"var(--accent2)":"var(--danger)"}}>{periodUp?"▲ +":"▼ "}{fmt2(periodPct)}% <span style={{color:"var(--text-dim)",fontWeight:400,fontSize:12}}>{range}</span></span>}
               </div>
@@ -2298,7 +2298,7 @@ function MarketsPanel({ apiKey }) {
         <>
           <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:20}}>
             <button onClick={runMacro} disabled={loading}
-              style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading?"not-allowed":"pointer",opacity:loading?.5:1}}>
+              style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent-btn)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading?"not-allowed":"pointer",opacity:loading?.5:1}}>
               {loading?"…":(macroRes?"Refresh snapshot":"Generate macro snapshot")}
             </button>
             <span style={{fontSize:12,color:"var(--text-dim)"}}>Current rates, inflation and markets, with a plain-English read.</span>
@@ -2352,9 +2352,9 @@ function App() {
 
       {/* Header */}
       <div style={{padding:"32px 0 24px",borderBottom:"1px solid var(--border)"}}>
-        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:11,fontWeight:500,letterSpacing:".15em",textTransform:"uppercase",color:"var(--accent)",marginBottom:8}}>Investment Learning Tool</div>
+        <div style={{fontFamily:"Sora,sans-serif",fontSize:11,fontWeight:500,letterSpacing:".15em",textTransform:"uppercase",color:"var(--accent)",marginBottom:8}}>Investment Research</div>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
-          <h1 style={{fontFamily:"Space Grotesk,sans-serif",fontSize:28,fontWeight:700,letterSpacing:"-.02em"}}>
+          <h1 style={{fontFamily:"Sora,sans-serif",fontSize:28,fontWeight:700,letterSpacing:"-.02em"}}>
             Stock <span style={{color:"var(--accent2)"}}>Explorer</span>
           </h1>
           <button onClick={resetKey}
@@ -2362,7 +2362,7 @@ function App() {
             Sign out
           </button>
         </div>
-        <p style={{fontSize:14,color:"var(--text-muted)",marginTop:6}}>Research stocks, understand price moves, compare companies, and map industry value chains.</p>
+        <p style={{fontSize:14,color:"var(--text-muted)",marginTop:6}}>Research stocks and indices, understand price moves, compare companies, map value chains, and read the macro backdrop.</p>
         <p style={{fontSize:12,color:"var(--text-dim)",marginTop:6}}>Tip: tap <span style={{color:"var(--accent3)"}}>☆</span> to save a ticker to your watchlist, and tap any <span style={{borderBottom:"1px dotted var(--accent2)"}}>underlined term</span> for a plain-English definition.</p>
       </div>
 
@@ -2389,7 +2389,7 @@ function App() {
 
       {/* Disclaimer */}
       <div style={{marginTop:40,padding:"14px 18px",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",fontSize:12,color:"var(--text-dim)",lineHeight:1.5}}>
-        ⚠️ For <strong style={{color:"var(--text-muted)"}}>educational purposes only</strong> — not financial advice.
+        ⚠️ <strong style={{color:"var(--text-muted)"}}>Not financial advice.</strong>
         Always do your own research and consult a licensed financial adviser before making investment decisions.
         AI-generated analysis may contain errors — verify important figures independently.
       </div>
