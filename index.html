@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Stock Explorer — Investment Research</title>
+<title>Market Explorer — Investment Research</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -57,7 +57,7 @@ const STORAGE_KEYS = {
 // Requests go to our own Worker, which holds the Anthropic key server-side and
 // checks a shared access password. The key is never present in the browser.
 const PROXY_URL = "https://stock-explorer-proxy.alistair-mccreadie.workers.dev";
-const BUILD = "2026-11-17 · redesign";  // shown in the footer so you can confirm the live build
+const BUILD = "2026-11-17 · market-explorer";  // shown in the footer so you can confirm the live build
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
 // Model tiers — route each task to the right capability/cost point.
@@ -301,7 +301,7 @@ function ApiKeyGate({ onKey }) {
           Investment Research
         </div>
         <h1 style={{fontFamily:"Sora,sans-serif",fontSize:26,fontWeight:700,marginBottom:8,letterSpacing:"-.02em"}}>
-          Stock <span style={{color:"var(--accent2)"}}>Explorer</span>
+          Market <span style={{color:"var(--accent)"}}>Explorer</span>
         </h1>
         <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.6,marginBottom:32}}>
           Enter the access password to get started. It's saved in this browser so you only need to do this once.
@@ -2355,7 +2355,7 @@ function App() {
         <div style={{fontFamily:"Sora,sans-serif",fontSize:11,fontWeight:500,letterSpacing:".15em",textTransform:"uppercase",color:"var(--accent)",marginBottom:8}}>Investment Research</div>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
           <h1 style={{fontFamily:"Sora,sans-serif",fontSize:28,fontWeight:700,letterSpacing:"-.02em"}}>
-            Stock <span style={{color:"var(--accent2)"}}>Explorer</span>
+            Market <span style={{color:"var(--accent)"}}>Explorer</span>
           </h1>
           <button onClick={resetKey}
             style={{background:"none",border:"1px solid var(--border)",borderRadius:6,color:"var(--text-dim)",fontSize:11,padding:"4px 10px",cursor:"pointer",fontFamily:"Inter,sans-serif"}}>
@@ -2393,7 +2393,7 @@ function App() {
         Always do your own research and consult a licensed financial adviser before making investment decisions.
         AI-generated analysis may contain errors — verify important figures independently.
       </div>
-      <div style={{textAlign:"center",marginTop:14,fontSize:11,color:"var(--text-dim)"}}>Stock Explorer · build {BUILD}</div>
+      <div style={{textAlign:"center",marginTop:14,fontSize:11,color:"var(--text-dim)"}}>Market Explorer · build {BUILD}</div>
     </div>
   );
 }
