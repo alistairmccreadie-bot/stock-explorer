@@ -54,6 +54,8 @@ const STORAGE_KEYS = {
   profile:     "sx_profile",
   decision:    "sx_last_decision",
   decisionLib: "sx_decision_lib",
+  edgarTickers:"sx_edgar_tickers",
+  edgarCache:  "sx_edgar_cache",
   watchlist:   "sx_watchlist",
 };
 
@@ -61,7 +63,7 @@ const STORAGE_KEYS = {
 // Requests go to our own Worker, which holds the Anthropic key server-side and
 // checks a shared access password. The key is never present in the browser.
 const PROXY_URL = "https://stock-explorer-proxy.alistair-mccreadie.workers.dev";
-const BUILD = "2026-11-21 · probe-fix";  // shown in the footer so you can confirm the live build
+const BUILD = "2026-11-21 · edgar";  // shown in the footer so you can confirm the live build
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
 // Model tiers — route each task to the right capability/cost point.
@@ -184,8 +186,8 @@ async function callClaude(access, sys, usr, maxTokens, useSearch, onDelta, opts=
   if (useSearch !== false) {
     // Current web tools with dynamic filtering; web_fetch lets Claude read a source
     // page (filing, IR release) it finds, not just the search snippet.
-    body.tools = [{ type:"web_search_20260209", name:"web_search", max_uses:6 }];
-    if (opts.webFetch !== false) body.tools.push({ type:"web_fetch_20260209", name:"web_fetch", max_uses:4 });
+    body.tools = [{ type:"web_search_20260209", name:"web_search", max_uses:10 }];
+    if (opts.webFetch !== false) body.tools.push({ type:"web_fetch_20260209", name:"web_fetch", max_uses:6 });
   }
 
   let lastStatus = 0;
@@ -260,6 +262,82 @@ async function marketContextBlock(access, ticker) {
     }
     return L.filter(Boolean).join("\n")+"\n\n";
   } catch { return ""; }
+}
+
+// ─── SEC EDGAR (filings via the proxy; US-listed companies only) ─────────────
+const EDGAR_KEY_FORMS = new Set(["10-K","10-Q","8-K","20-F","40-F","6-K","DEF 14A","S-1","S-3","S-4","10-K/A","10-Q/A","8-K/A","20-F/A","424B4"]);
+const EDGAR_INSIDER   = new Set(["3","4","5","144","4/A"]);
+const EDGAR_ITEMS = {"1.01":"Material agreement","1.02":"Agreement terminated","2.01":"Acquisition / disposal","2.02":"Earnings release","2.03":"New debt obligation","2.05":"Restructuring costs","2.06":"Impairment","3.01":"Listing notice","4.01":"Auditor change","4.02":"Restatement","5.01":"Change in control","5.02":"Executive / board change","5.03":"Bylaw / fiscal-year change","5.07":"Shareholder vote","7.01":"Reg FD disclosure","8.01":"Other events"};
+const EDGAR_FORMS = {"10-K":"Annual report","10-Q":"Quarterly report","8-K":"Current report","20-F":"Annual report (foreign issuer)","40-F":"Annual report (Canadian issuer)","6-K":"Current report (foreign issuer)","DEF 14A":"Proxy statement","S-1":"Registration statement","S-3":"Shelf registration","S-4":"Merger registration","4":"Insider transaction","3":"Initial insider holding","5":"Annual insider statement","144":"Proposed insider sale","424B4":"Final prospectus","10-K/A":"Annual report (amended)","10-Q/A":"Quarterly report (amended)","8-K/A":"Current report (amended)","424B2":"Debt/note offering prospectus","424B3":"Prospectus supplement","424B5":"Prospectus supplement","FWP":"Offering term sheet","25-NSE":"Delisting of a security class","SC 13G":"Large passive stake (5%+)","SC 13D":"Large active stake (5%+)","SC 13G/A":"Large passive stake (amended)","SC 13D/A":"Large active stake (amended)","11-K":"Employee plan annual report","SD":"Conflict-minerals report","ARS":"Annual report to shareholders","DEFA14A":"Additional proxy material","4/A":"Insider transaction (amended)"};
+const isEarnings8K = f => (f.form==="8-K"||f.form==="8-K/A") && /(^|,)\s*2\.02/.test(f.items||"");
+function edgarDesc(f) {
+  if (f.form==="8-K"||f.form==="8-K/A") { const l=(f.items||"").split(",").map(s=>EDGAR_ITEMS[s.trim()]).filter(Boolean); if (l.length) return l.join(", "); }
+  return EDGAR_FORMS[f.form] || f.desc || f.form;
+}
+async function edgarFetch(access, params) {
+  let res;
+  try { res = await fetch(PROXY_URL + "/edgar?" + new URLSearchParams(params).toString(), { headers:{ "x-access-code":access } }); }
+  catch { throw new Error("Network error reaching SEC EDGAR."); }
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok) throw new Error(friendlyError(res.status, data.error));
+  return data;
+}
+// Ticker -> CIK, from SEC's map; slimmed and cached in this browser for 7 days.
+async function edgarCik(access, ticker) {
+  const t = (ticker||"").trim().toUpperCase().replace(/\./g,"-");
+  let c = LS.get(STORAGE_KEYS.edgarTickers);
+  if (!c || !c.map || (Date.now()-(c.ts||0)) > 7*86400000) {
+    const raw = await edgarFetch(access, {fn:"tickers"});
+    const map = {}; Object.values(raw).forEach(v=>{ if (v && v.ticker) map[String(v.ticker).toUpperCase()] = v.cik_str; });
+    c = {map, ts:Date.now()}; LS.set(STORAGE_KEYS.edgarTickers, c);
+  }
+  return c.map[t] || null;
+}
+// Recent filings for a ticker (cached 30 min). Returns {name, cik, filings} or null if not in EDGAR.
+async function edgarFilings(access, ticker) {
+  const t = (ticker||"").trim().toUpperCase();
+  const memo = LS.get(STORAGE_KEYS.edgarCache, {});
+  if (memo[t] && (Date.now()-memo[t].ts) < 30*60000) return memo[t].data;
+  const cik = await edgarCik(access, t);
+  if (!cik) return null;
+  const d = await edgarFetch(access, {fn:"submissions", cik:String(cik)});
+  const r = (d.filings && d.filings.recent) || {}; const n = Math.min((r.form||[]).length, 100);
+  const filings = [];
+  for (let i=0; i<n; i++) {
+    const acc = (r.accessionNumber[i]||"").replace(/-/g,"");
+    filings.push({ form:r.form[i], filed:r.filingDate[i], period:(r.reportDate&&r.reportDate[i])||"", items:(r.items&&r.items[i])||"", desc:(r.primaryDocDescription&&r.primaryDocDescription[i])||"",
+      url:"https://www.sec.gov/Archives/edgar/data/"+cik+"/"+acc+"/"+r.primaryDocument[i] });
+  }
+  const data = { name:d.name, cik, filings };
+  const keys = Object.keys(memo); if (keys.length >= 12) keys.sort((a,b)=>memo[a].ts-memo[b].ts).slice(0, keys.length-11).forEach(k=>delete memo[k]);
+  memo[t] = {ts:Date.now(), data}; LS.set(STORAGE_KEYS.edgarCache, memo);
+  return data;
+}
+// Authoritative filing dates for the AI. "" if not a US filer or on any error.
+async function edgarContextBlock(access, ticker) {
+  try {
+    const d = await edgarFilings(access, ticker); if (!d || !d.filings.length) return "";
+    const f = d.filings;
+    const annual = f.find(x=>["10-K","20-F","40-F"].includes(x.form));
+    const quarterly = f.find(x=>x.form==="10-Q");
+    const earnings = f.find(isEarnings8K);
+    const other8k = f.filter(x=>x.form==="8-K" && !isEarnings8K(x)).slice(0,3);
+    const cutoff = new Date(Date.now()-90*86400000).toISOString().slice(0,10);
+    const insider = f.filter(x=>EDGAR_INSIDER.has(x.form) && x.filed>=cutoff).length;
+    const L = ["SEC FILINGS for "+t2(ticker)+" ("+d.name+", from EDGAR — authoritative filing dates; use these rather than memory):"];
+    if (annual) L.push("- Latest annual report ("+annual.form+"): filed "+annual.filed+(annual.period?", fiscal period ending "+annual.period:""));
+    if (quarterly) L.push("- Latest quarterly report (10-Q): filed "+quarterly.filed+(quarterly.period?", period ending "+quarterly.period:""));
+    if (earnings) L.push("- Latest earnings release (8-K Item 2.02): filed "+earnings.filed);
+    other8k.forEach(x=>L.push("- 8-K filed "+x.filed+": "+edgarDesc(x)));
+    L.push("- Insider filings (Forms 3/4/5/144) in the last 90 days: "+insider);
+    return L.join("\n")+"\n\n";
+  } catch { return ""; }
+}
+function t2(s){ return (s||"").trim().toUpperCase(); }
+// Real-data grounding for the AI tabs: live market figures + SEC filing dates.
+async function groundingBlock(access, ticker) {
+  const [m,e] = await Promise.all([ marketContextBlock(access,ticker), edgarContextBlock(access,ticker) ]);
+  return m + e;
 }
 
 // ─── SHARED CHAIN LIBRARY (server-side, via the proxy) ────────────────────────
@@ -901,7 +979,7 @@ function ResearchPanel({ apiKey }) {
           {h:"Verdict", d:"2-4 sentences — is this an interesting company to learn from, and why."},
         ]
       );
-      const ctx=await marketContextBlock(apiKey, tk.toUpperCase());
+      const ctx=await groundingBlock(apiKey, tk.toUpperCase());
       const usr=ctx+"Research "+tk.toUpperCase()+" as an investment. Find latest earnings, revenue growth, competitive position, valuation multiples, and analyst views. Follow the required section format exactly.";
       const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult);
       const now=Date.now();setResult(text);setSources(src);setTs(now);
@@ -1386,7 +1464,7 @@ function ValuationPanel({ apiKey }) {
           {h:"What Today's Price Assumes", d:"1-3 sentences on the earnings growth and/or margins the current multiple implies — i.e., the expectations baked into the price."},
         ]
       );
-      const ctx=await marketContextBlock(apiKey, T);
+      const ctx=await groundingBlock(apiKey, T);
       const usr=ctx+"Analyse the valuation of "+T+" versus its industry/sector and its own ~5-year history. Search for current and historical valuation multiples for both the company and its peer group. Follow the required format exactly.";
       const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult,{model:MODEL_DEEP,effort:"high"});
       const now=Date.now();setResult(text);setSources(src);setTs(now);
@@ -2025,6 +2103,60 @@ function StatTile({ label, value }) {
   );
 }
 
+function FilingsPanel({ apiKey, ticker }) {
+  const [data,setData]   = useState(null);
+  const [state,setState] = useState("idle");   // idle | loading | none | error | ok
+  const [err,setErr]     = useState("");
+  const [all,setAll]     = useState(false);
+  useEffect(()=>{
+    let alive=true; const t=(ticker||"").trim();
+    if(!t){ setState("idle"); return; }
+    setState("loading"); setData(null); setErr("");
+    edgarFilings(apiKey,t).then(d=>{ if(!alive)return; if(!d){ setState("none"); return; } setData(d); setState("ok"); })
+      .catch(e=>{ if(!alive)return; setErr(e.message); setState("error"); });
+    return ()=>{ alive=false; };
+  },[ticker,apiKey]);
+  if(state==="idle") return null;
+  const rows = data ? data.filings.filter(f=>all||EDGAR_KEY_FORMS.has(f.form)).slice(0, all?40:15) : [];
+  const th={textAlign:"left",fontSize:11,color:"var(--text-dim)",textTransform:"uppercase",letterSpacing:".04em",padding:"8px 10px",borderBottom:"1px solid var(--border)",whiteSpace:"nowrap"};
+  const td={padding:"9px 10px",borderBottom:"1px solid var(--border)",fontSize:13,verticalAlign:"top"};
+  const chip=(on,label,fn)=>(<button onClick={fn} style={{padding:"3px 10px",borderRadius:20,border:"1px solid "+(on?"var(--accent)":"var(--border)"),background:on?"var(--surface2)":"none",color:on?"var(--accent)":"var(--text-muted)",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Inter,sans-serif"}}>{label}</button>);
+  return (
+    <div style={{marginTop:18,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"16px 18px"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,marginBottom:12}}>
+        <div style={{fontFamily:"Sora,sans-serif",fontSize:14,fontWeight:700}}>SEC filings <span style={{fontSize:10,fontWeight:700,color:"var(--accent)",border:"1px solid var(--border)",borderRadius:10,padding:"1px 7px",marginLeft:6,verticalAlign:"middle"}}>EDGAR</span></div>
+        {state==="ok"&&(
+          <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+            {chip(!all,"Key filings",()=>setAll(false))}
+            {chip(all,"All (incl. insider)",()=>setAll(true))}
+            <a href={"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK="+data.cik+"&owner=include&count=40"} target="_blank" rel="noreferrer" style={{fontSize:11,color:"var(--accent)",marginLeft:4}}>View on EDGAR ↗</a>
+          </div>
+        )}
+      </div>
+      {state==="loading"&&<div style={{fontSize:13,color:"var(--text-dim)"}}>Loading SEC filings…</div>}
+      {state==="none"&&<div style={{fontSize:13,color:"var(--text-dim)"}}>No SEC filings found — EDGAR covers US-listed companies (ETFs and non-US listings won't appear).</div>}
+      {state==="error"&&<div style={{fontSize:13,color:"var(--danger)"}}>⚠️ {err}</div>}
+      {state==="ok"&&(
+        rows.length===0 ? <div style={{fontSize:13,color:"var(--text-dim)"}}>No key filings in the recent history — try "All".</div> :
+        <div style={{overflowX:"auto"}}>
+          <table style={{borderCollapse:"collapse",width:"100%"}}>
+            <thead><tr><th style={th}>Form</th><th style={th}>Filed</th><th style={th}>Period</th><th style={th}>What it is</th><th style={th}></th></tr></thead>
+            <tbody>{rows.map((f,i)=>(
+              <tr key={i}>
+                <td style={td}><span style={{fontFamily:"Sora,sans-serif",fontWeight:700,fontSize:12,color:isEarnings8K(f)?"var(--accent3)":"var(--text)"}}>{f.form}</span></td>
+                <td style={{...td,whiteSpace:"nowrap",fontVariantNumeric:"tabular-nums"}}>{f.filed}</td>
+                <td style={{...td,whiteSpace:"nowrap",color:"var(--text-muted)",fontVariantNumeric:"tabular-nums"}}>{f.period||"—"}</td>
+                <td style={{...td,color:isEarnings8K(f)?"var(--accent3)":"var(--text-muted)"}}>{edgarDesc(f)}</td>
+                <td style={{...td,textAlign:"right"}}><a href={f.url} target="_blank" rel="noreferrer" style={{color:"var(--accent)",fontSize:12,textDecoration:"none"}}>Open ↗</a></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ChartPanel({ apiKey }) {
   const saved=LS.get(STORAGE_KEYS.market);
   const [ticker,setTicker]   = useState(saved?.ticker||"");
@@ -2160,6 +2292,7 @@ function ChartPanel({ apiKey }) {
               {info.summary&&<div>{info.summary.length>320?info.summary.slice(0,320)+"…":info.summary}</div>}
             </div>
           )}
+          <FilingsPanel apiKey={apiKey} ticker={quote.symbol}/>
           <div style={{fontSize:11,color:"var(--text-dim)",marginTop:12}}>
             Price &amp; chart: Twelve Data{fundSrc?" · fundamentals: "+(fundSrc==="web"?"web (AI)":fundSrc):""}{fundLoading?" · fetching fundamentals…":""}{ts?" · loaded "+new Date(ts).toLocaleString("en-AU",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):""}. Figures may be delayed; verify before trading.
           </div>
@@ -2351,7 +2484,7 @@ function DecisionPanel({ apiKey }) {
     if(!tk)return;
     setTicker(tk);setLoading(true);setError(null);setResult(null);setSources(null);setTs(null);resetProbe();
     try{
-      const ctx=await marketContextBlock(apiKey,tk);
+      const ctx=await groundingBlock(apiKey,tk);
       const port=LS.get(STORAGE_KEYS.portfolio,[]); const held=port.find(p=>p.ticker===tk);
       const holdNote = held ? ("The investor ALREADY HOLDS "+held.shares+" shares of "+tk+" at an average cost of "+held.cost+(held.px?(" (currently "+held.px+", P/L "+(((held.px-held.cost)/held.cost)*100).toFixed(1)+"%)"):"")+". Frame the recommendation as add / hold / trim / exit on this existing position.\n\n") : "";
       const sys=buildSys(

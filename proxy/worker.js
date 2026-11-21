@@ -6,6 +6,7 @@
 //   GET/POST /library  → shared chain library (save/delete)  (gated by ACCESS_PASSWORD)
 //   GET/POST /glossary → shared saved-glossary library       (gated by ACCESS_PASSWORD)
 //   GET /market        → market data via Twelve Data         (gated by ACCESS_PASSWORD)
+//   GET /edgar         → SEC EDGAR filings (tickers/submissions) (gated by ACCESS_PASSWORD)
 //
 // Your Anthropic and market-data keys are held server-side and never reach any browser.
 //
@@ -14,6 +15,7 @@
 //     ANTHROPIC_API_KEY  — your Anthropic key (sk-ant-...)
 //     ACCESS_PASSWORD    — shared password to use the app, open saved chains, and save chains
 //     TWELVEDATA_KEY     — your free Twelve Data API key (for /market: charts + stats)
+//     EDGAR_CONTACT      — your email; SEC requires it in the User-Agent (for /edgar)
 //   Binding (KV namespace binding):
 //     Variable name: LIBRARY   →  bind to your KV namespace
 //   (optional) Plaintext variable:
@@ -92,6 +94,39 @@ export default {
       const headers = new Headers(cors);
       headers.set("Content-Type", "application/json");
       return new Response(body, { status, headers });
+    }
+
+    // ── SEC EDGAR filings — streamed through with the SEC-required User-Agent ───
+    // Pure passthrough (no JSON parsing) so large files stay well inside the Worker
+    // CPU limit; responses are cached at Cloudflare's edge.
+    if (path === "/edgar") {
+      if (!accessOk) return json({ error: { message: "Wrong access password." } }, 401, cors);
+      const contact = (env.EDGAR_CONTACT || "").trim();
+      if (!contact) return json({ error: { message: "Server has no EDGAR_CONTACT variable. Add your email under Settings -> Variables and Secrets, then Deploy." } }, 500, cors);
+      const u = new URL(request.url);
+      const fn = u.searchParams.get("fn");
+      let target, ttl;
+      if (fn === "tickers") {
+        target = "https://www.sec.gov/files/company_tickers.json"; ttl = 86400;
+      } else if (fn === "submissions") {
+        const cik = (u.searchParams.get("cik") || "").replace(/\D/g, "");
+        if (!cik || cik.length > 10) return json({ error: { message: "Bad EDGAR request (need a numeric cik)." } }, 400, cors);
+        target = "https://data.sec.gov/submissions/CIK" + cik.padStart(10, "0") + ".json"; ttl = 1800;
+      } else {
+        return json({ error: { message: "Bad EDGAR request (fn must be tickers or submissions)." } }, 400, cors);
+      }
+      let upstream;
+      try {
+        upstream = await fetch(target, {
+          headers: { "User-Agent": "Market Explorer " + contact, "Accept": "application/json" },
+          cf: { cacheTtl: ttl, cacheEverything: true },
+        });
+      } catch { return json({ error: { message: "Could not reach SEC EDGAR." } }, 502, cors); }
+      if (upstream.status === 404) return json({ error: { message: "No SEC filings found for that company." } }, 404, cors);
+      if (upstream.status === 403) return json({ error: { message: "SEC EDGAR refused the request (check EDGAR_CONTACT is a valid email)." } }, 502, cors);
+      const headers = new Headers(cors);
+      headers.set("Content-Type", "application/json");
+      return new Response(upstream.body, { status: upstream.status, headers });
     }
 
     // ── Anthropic proxy (default) ───────────────────────────────────────────────
