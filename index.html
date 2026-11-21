@@ -61,7 +61,7 @@ const STORAGE_KEYS = {
 // Requests go to our own Worker, which holds the Anthropic key server-side and
 // checks a shared access password. The key is never present in the browser.
 const PROXY_URL = "https://stock-explorer-proxy.alistair-mccreadie.workers.dev";
-const BUILD = "2026-11-21 · probe";  // shown in the footer so you can confirm the live build
+const BUILD = "2026-11-21 · probe-fix";  // shown in the footer so you can confirm the live build
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
 // Model tiers — route each task to the right capability/cost point.
@@ -2381,8 +2381,8 @@ function DecisionPanel({ apiKey }) {
     setProbeErr(null);setProbeLoading(true);setProbeStream("");setProbeCurQ(q);
     try{
       const hist=probeThread.map(x=>"Q: "+x.q+"\nA: "+x.a).join("\n\n");
-      const sys="You are the portfolio manager who wrote the decision brief below on "+ticker+", for an investor with a "+risk+" risk tolerance and a "+HORIZONS[horizon]+" time horizon. Answer their follow-up directly and honestly — defend, refine, or change your view as the evidence warrants, and say so plainly if your stance shifts. Be concise and specific, use real numbers, and search the web for any current facts you need. Plain English. This is analysis, not financial advice.\n\nYOUR BRIEF:\n"+result+(hist?("\n\nEARLIER FOLLOW-UPS:\n"+hist):"");
-      const {text}=await callClaude(apiKey,sys,"Question: "+q,4000,true,setProbeStream,{model:MODEL_STD,effort:"medium"});
+      const sys="You are the portfolio manager who wrote the decision brief below on "+ticker+", for an investor with a "+risk+" risk tolerance and a "+HORIZONS[horizon]+" time horizon. Answer their follow-up directly and honestly — defend, refine, or change your view as the evidence warrants, and say so plainly if your stance shifts. Be concise and specific, use real numbers, and reason from the brief above and your own knowledge (this is a follow-up on that brief, not a fresh web search). Plain English. This is analysis, not financial advice.\n\nYOUR BRIEF:\n"+result+(hist?("\n\nEARLIER FOLLOW-UPS:\n"+hist):"");
+      const {text}=await callClaude(apiKey,sys,"Question: "+q,4000,false,setProbeStream,{model:MODEL_STD,effort:"medium"});
       setProbeThread(t=>[...t,{q,a:text}]); setProbeStream(""); setProbeCurQ(""); setProbeQ("");
     }catch(e){ setProbeErr(e.message); setProbeCurQ(""); }
     finally{ setProbeLoading(false); }
