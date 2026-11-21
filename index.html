@@ -53,6 +53,7 @@ const STORAGE_KEYS = {
   portfolio:   "sx_portfolio",
   profile:     "sx_profile",
   decision:    "sx_last_decision",
+  decisionLib: "sx_decision_lib",
   watchlist:   "sx_watchlist",
 };
 
@@ -60,7 +61,7 @@ const STORAGE_KEYS = {
 // Requests go to our own Worker, which holds the Anthropic key server-side and
 // checks a shared access password. The key is never present in the browser.
 const PROXY_URL = "https://stock-explorer-proxy.alistair-mccreadie.workers.dev";
-const BUILD = "2026-11-21 · portfolio-edit";  // shown in the footer so you can confirm the live build
+const BUILD = "2026-11-21 · decision-cache";  // shown in the footer so you can confirm the live build
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
 // Model tiers — route each task to the right capability/cost point.
@@ -2319,22 +2320,29 @@ function MarketsPanel({ apiKey }) {
 const HORIZONS = { short:"short (under ~1 year)", medium:"medium (1-3 year)", long:"long (3+ year)" };
 function DecisionPanel({ apiKey }) {
   const prof = LS.get(STORAGE_KEYS.profile, {horizon:"long", risk:"balanced"});
-  const saved = LS.get(STORAGE_KEYS.decision);
+  // Per-ticker brief library (migrate the old single-slot cache if present).
+  const initLib=()=>{ let l=LS.get(STORAGE_KEYS.decisionLib,null); if(!l){ const o=LS.get(STORAGE_KEYS.decision); l=(o&&o.result&&o.ticker)?{[o.ticker]:{ticker:o.ticker,result:o.result,sources:o.sources||null,ts:o.ts||Date.now()}}:{}; LS.set(STORAGE_KEYS.decisionLib,l); } return l; };
+  const lastT=(()=>{ const d=LS.get(STORAGE_KEYS.decision); return typeof d==="string"?d:((d&&d.ticker)||""); })();
+  const [lib,setLib]         = useState(initLib);
+  const cur0 = lib[lastT];
   const [horizon,setHorizon] = useState(prof.horizon||"long");
   const [risk,setRisk]       = useState(prof.risk||"balanced");
-  const [ticker,setTicker]   = useState(saved?.ticker||"");
-  const [result,setResult]   = useState(saved?.result||null);
-  const [sources,setSources] = useState(saved?.sources||null);
-  const [ts,setTs]           = useState(saved?.ts||null);
+  const [ticker,setTicker]   = useState(lastT||"");
+  const [result,setResult]   = useState(cur0?cur0.result:null);
+  const [sources,setSources] = useState(cur0?cur0.sources:null);
+  const [ts,setTs]           = useState(cur0?cur0.ts:null);
   const [loading,setLoading] = useState(false);
   const [error,setError]     = useState(null);
-  const clearCache=()=>{setResult(null);setSources(null);setTs(null);LS.del(STORAGE_KEYS.decision);};
+  const saveLib=(l)=>{ setLib(l); LS.set(STORAGE_KEYS.decisionLib,l); };
   const setProfile=(h,r)=>{ setHorizon(h); setRisk(r); LS.set(STORAGE_KEYS.profile,{horizon:h,risk:r}); };
+  const openCached=(tk)=>{ const e=lib[tk]; if(!e)return; setTicker(tk);setResult(e.result);setSources(e.sources);setTs(e.ts);setError(null);setLoading(false); LS.set(STORAGE_KEYS.decision,tk); };
+  const removeBrief=(tk)=>{ const l={...lib}; delete l[tk]; saveLib(l); if(ticker===tk){ setResult(null);setSources(null);setTs(null); } };
+  const clearCache=()=>removeBrief(ticker);
 
   const run=useCallback(async(override)=>{
     const tk=((typeof override==="string"?override:ticker)||"").trim().toUpperCase();
     if(!tk)return;
-    setLoading(true);setError(null);setResult(null);setSources(null);setTs(null);
+    setTicker(tk);setLoading(true);setError(null);setResult(null);setSources(null);setTs(null);
     try{
       const ctx=await marketContextBlock(apiKey,tk);
       const port=LS.get(STORAGE_KEYS.portfolio,[]); const held=port.find(p=>p.ticker===tk);
@@ -2353,10 +2361,12 @@ function DecisionPanel({ apiKey }) {
       const usr=ctx+holdNote+"Write the decision brief for "+tk+". Follow the required format exactly.";
       const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult,{model:MODEL_DEEP,effort:"high"});
       const now=Date.now();setResult(text);setSources(src);setTs(now);
-      LS.set(STORAGE_KEYS.decision,{ticker:tk,result:text,sources:src,ts:now});
+      const entry={ticker:tk,result:text,sources:src,ts:now};
+      saveLib({...LS.get(STORAGE_KEYS.decisionLib,{}),[tk]:entry}); LS.set(STORAGE_KEYS.decision,tk);
     }catch(e){setError(e.message);}finally{setLoading(false);}
   },[ticker,apiKey,horizon,risk]);
   const pick=t=>run(t);
+  const briefs=Object.values(lib).sort((a,b)=>(b.ts||0)-(a.ts||0));
   const sel={background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:13,padding:"9px 12px",outline:"none"};
 
   return (
@@ -2387,6 +2397,20 @@ function DecisionPanel({ apiKey }) {
       </div>
       <Chips items={EXAMPLE_TICKERS} onClick={t=>setTicker(t)} style={{marginBottom:16}}/>
       <WatchlistBar onPick={pick}/>
+      {briefs.length>0&&(
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:12,color:"var(--accent3)",marginBottom:8}}>🧭 Saved briefs — click to reopen (no re-run):</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {briefs.map(e=>(
+              <span key={e.ticker} title={e.ts?("Saved "+new Date(e.ts).toLocaleString("en-AU",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})):""}
+                style={{display:"inline-flex",alignItems:"center",gap:6,background:"var(--surface2)",border:"1px solid "+(ticker===e.ticker?"var(--accent)":"var(--border)"),borderRadius:20,padding:"4px 6px 4px 12px"}}>
+                <button onClick={()=>openCached(e.ticker)} style={{background:"none",border:"none",color:ticker===e.ticker?"var(--accent)":"var(--text)",fontFamily:"Sora,sans-serif",fontSize:12,fontWeight:700,letterSpacing:".03em",cursor:"pointer",padding:0}}>{e.ticker}</button>
+                <button onClick={()=>removeBrief(e.ticker)} title="Remove saved brief" style={{background:"none",border:"none",color:"var(--text-dim)",fontSize:14,lineHeight:1,cursor:"pointer",padding:0}}>×</button>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
       {loading&&!result&&<Loader label="Weighing the evidence…"/>}
       {error&&<div style={{background:"#1e1010",border:"1px solid #4a1e1e",borderRadius:"var(--radius-sm)",color:"var(--danger)",padding:"14px 16px",fontSize:13}}>⚠️ {error}</div>}
       {result&&<>{ts&&<CachedBanner timestamp={ts} onClear={clearCache}/>}{loading&&<StreamNote/>}<ParsedResult text={result} sources={sources}/></>}
@@ -2482,9 +2506,9 @@ function PortfolioPanel({ apiKey }) {
                     <td style={{...num,color:r.px==null?"var(--text-dim)":(r._pl>=0?"var(--accent2)":"var(--danger)")}}>{r.px==null?"—":((r._pl>=0?"+":"")+fmtBig(r._pl,true)+" ("+(r._plPct>=0?"+":"")+fmt2(r._plPct)+"%)")}</td>
                     <td style={{...num,color:hot?"var(--accent3)":"var(--text-muted)"}}>{fmt2(wt)}%</td>
                     <td style={num}>{r.target!=null?fmtNum(r.target):"—"}</td>
-                    <td style={{...td,textAlign:"center",whiteSpace:"nowrap"}}>
-                      <button onClick={()=>startEdit(r)} title="Edit" style={{background:"none",border:"none",color:editing===r.ticker?"var(--accent)":"var(--text-dim)",fontSize:13,cursor:"pointer",marginRight:6}}>✎</button>
-                      <button onClick={()=>remove(r.ticker)} title="Remove" style={{background:"none",border:"none",color:"var(--text-dim)",fontSize:15,cursor:"pointer"}}>×</button>
+                    <td style={{...td,textAlign:"right",whiteSpace:"nowrap"}}>
+                      <button onClick={()=>startEdit(r)} title="Edit this position" style={{background:"none",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:editing===r.ticker?"var(--accent)":"var(--text-muted)",fontSize:12,fontWeight:600,padding:"3px 9px",cursor:"pointer",marginRight:6,fontFamily:"Inter,sans-serif"}}>Edit</button>
+                      <button onClick={()=>remove(r.ticker)} title="Remove this position" style={{background:"none",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text-muted)",fontSize:12,fontWeight:600,padding:"3px 9px",cursor:"pointer",fontFamily:"Inter,sans-serif"}}>Remove</button>
                     </td>
                   </tr>
                 );})}
@@ -2507,7 +2531,7 @@ function PortfolioPanel({ apiKey }) {
           {editing&&<button onClick={clearForm} style={{padding:"9px 16px",borderRadius:"var(--radius-sm)",background:"none",border:"1px solid var(--border)",color:"var(--text-muted)",fontFamily:"Inter,sans-serif",fontSize:13,cursor:"pointer"}}>Cancel</button>}
         </div>
         {msg&&<div style={{fontSize:12,color:"var(--danger)",marginTop:10}}>{msg}</div>}
-        <div style={{fontSize:11,color:"var(--text-dim)",marginTop:10}}>{editing?"Editing overwrites this position's figures exactly — no averaging.":"Adding a ticker you already hold averages the new shares into your cost basis. Use the ✎ edit button to correct a position instead."}</div>
+        <div style={{fontSize:11,color:"var(--text-dim)",marginTop:10}}>{editing?"Editing overwrites this position's figures exactly — no averaging.":"Adding a ticker you already hold averages the new shares into your cost basis. Use the Edit button on a row to correct a position instead."}</div>
       </div>
     </div>
   );
