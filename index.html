@@ -61,7 +61,7 @@ const STORAGE_KEYS = {
 // Requests go to our own Worker, which holds the Anthropic key server-side and
 // checks a shared access password. The key is never present in the browser.
 const PROXY_URL = "https://stock-explorer-proxy.alistair-mccreadie.workers.dev";
-const BUILD = "2026-11-21 · decision-cache";  // shown in the footer so you can confirm the live build
+const BUILD = "2026-11-21 · probe";  // shown in the footer so you can confirm the live build
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
 // Model tiers — route each task to the right capability/cost point.
@@ -2333,16 +2333,23 @@ function DecisionPanel({ apiKey }) {
   const [ts,setTs]           = useState(cur0?cur0.ts:null);
   const [loading,setLoading] = useState(false);
   const [error,setError]     = useState(null);
+  const [probeQ,setProbeQ]         = useState("");
+  const [probeThread,setProbeThread] = useState([]);
+  const [probeStream,setProbeStream] = useState("");
+  const [probeCurQ,setProbeCurQ]   = useState("");
+  const [probeLoading,setProbeLoading] = useState(false);
+  const [probeErr,setProbeErr]     = useState(null);
+  const resetProbe=()=>{ setProbeThread([]);setProbeStream("");setProbeCurQ("");setProbeErr(null);setProbeQ(""); };
   const saveLib=(l)=>{ setLib(l); LS.set(STORAGE_KEYS.decisionLib,l); };
   const setProfile=(h,r)=>{ setHorizon(h); setRisk(r); LS.set(STORAGE_KEYS.profile,{horizon:h,risk:r}); };
-  const openCached=(tk)=>{ const e=lib[tk]; if(!e)return; setTicker(tk);setResult(e.result);setSources(e.sources);setTs(e.ts);setError(null);setLoading(false); LS.set(STORAGE_KEYS.decision,tk); };
+  const openCached=(tk)=>{ const e=lib[tk]; if(!e)return; setTicker(tk);setResult(e.result);setSources(e.sources);setTs(e.ts);setError(null);setLoading(false);resetProbe(); LS.set(STORAGE_KEYS.decision,tk); };
   const removeBrief=(tk)=>{ const l={...lib}; delete l[tk]; saveLib(l); if(ticker===tk){ setResult(null);setSources(null);setTs(null); } };
   const clearCache=()=>removeBrief(ticker);
 
   const run=useCallback(async(override)=>{
     const tk=((typeof override==="string"?override:ticker)||"").trim().toUpperCase();
     if(!tk)return;
-    setTicker(tk);setLoading(true);setError(null);setResult(null);setSources(null);setTs(null);
+    setTicker(tk);setLoading(true);setError(null);setResult(null);setSources(null);setTs(null);resetProbe();
     try{
       const ctx=await marketContextBlock(apiKey,tk);
       const port=LS.get(STORAGE_KEYS.portfolio,[]); const held=port.find(p=>p.ticker===tk);
@@ -2367,6 +2374,19 @@ function DecisionPanel({ apiKey }) {
   },[ticker,apiKey,horizon,risk]);
   const pick=t=>run(t);
   const briefs=Object.values(lib).sort((a,b)=>(b.ts||0)-(a.ts||0));
+
+  const probe=useCallback(async(qOverride)=>{
+    const q=((typeof qOverride==="string"?qOverride:probeQ)||"").trim();
+    if(!q||!result)return;
+    setProbeErr(null);setProbeLoading(true);setProbeStream("");setProbeCurQ(q);
+    try{
+      const hist=probeThread.map(x=>"Q: "+x.q+"\nA: "+x.a).join("\n\n");
+      const sys="You are the portfolio manager who wrote the decision brief below on "+ticker+", for an investor with a "+risk+" risk tolerance and a "+HORIZONS[horizon]+" time horizon. Answer their follow-up directly and honestly — defend, refine, or change your view as the evidence warrants, and say so plainly if your stance shifts. Be concise and specific, use real numbers, and search the web for any current facts you need. Plain English. This is analysis, not financial advice.\n\nYOUR BRIEF:\n"+result+(hist?("\n\nEARLIER FOLLOW-UPS:\n"+hist):"");
+      const {text}=await callClaude(apiKey,sys,"Question: "+q,4000,true,setProbeStream,{model:MODEL_STD,effort:"medium"});
+      setProbeThread(t=>[...t,{q,a:text}]); setProbeStream(""); setProbeCurQ(""); setProbeQ("");
+    }catch(e){ setProbeErr(e.message); setProbeCurQ(""); }
+    finally{ setProbeLoading(false); }
+  },[probeQ,result,ticker,risk,horizon,apiKey,probeThread]);
   const sel={background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:13,padding:"9px 12px",outline:"none"};
 
   return (
@@ -2413,7 +2433,41 @@ function DecisionPanel({ apiKey }) {
       )}
       {loading&&!result&&<Loader label="Weighing the evidence…"/>}
       {error&&<div style={{background:"#1e1010",border:"1px solid #4a1e1e",borderRadius:"var(--radius-sm)",color:"var(--danger)",padding:"14px 16px",fontSize:13}}>⚠️ {error}</div>}
-      {result&&<>{ts&&<CachedBanner timestamp={ts} onClear={clearCache}/>}{loading&&<StreamNote/>}<ParsedResult text={result} sources={sources}/></>}
+      {result&&(
+        <>
+          {ts&&<CachedBanner timestamp={ts} onClear={clearCache}/>}
+          {loading&&<StreamNote/>}
+          <ParsedResult text={result} sources={sources}/>
+          {!loading&&(
+          <div style={{marginTop:24,background:"var(--surface2)",border:"1px solid var(--border)",borderLeft:"3px solid var(--accent)",borderRadius:"var(--radius)",padding:"18px 20px"}}>
+            <h3 style={{fontFamily:"Sora,sans-serif",fontSize:15,fontWeight:700,marginBottom:4}}>💬 Probe the verdict</h3>
+            <p style={{fontSize:12,color:"var(--text-muted)",marginBottom:12}}>Push back, stress-test, or ask anything about this call — answers stay grounded in this brief.</p>
+            <Chips items={["Make the bear case","What would change your mind?","Biggest risk to this call?","What if the market drops 20%?"]} onClick={probe} style={{marginBottom:10}}/>
+            <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+              <input placeholder="Ask a follow-up…" value={probeQ} onChange={e=>setProbeQ(e.target.value)} onKeyDown={e=>e.key==="Enter"&&probe()}
+                style={{flex:1,minWidth:200,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none"}}/>
+              <button onClick={probe} disabled={probeLoading||!probeQ.trim()}
+                style={{padding:"10px 20px",borderRadius:"var(--radius-sm)",background:"var(--accent-btn)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:probeLoading||!probeQ.trim()?"not-allowed":"pointer",opacity:probeLoading||!probeQ.trim()?.5:1}}>
+                {probeLoading?"…":"Ask"}
+              </button>
+            </div>
+            {probeErr&&<div style={{fontSize:13,color:"var(--danger)",marginTop:10}}>⚠️ {probeErr}</div>}
+            {probeThread.map((x,i)=>(
+              <div key={i} style={{marginTop:14}}>
+                <div style={{fontSize:13,fontWeight:600,color:"var(--text)",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"8px 12px"}}>{x.q}</div>
+                <ParsedResult text={x.a}/>
+              </div>
+            ))}
+            {probeLoading&&(
+              <div style={{marginTop:14}}>
+                {probeCurQ&&<div style={{fontSize:13,fontWeight:600,color:"var(--text)",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"8px 12px"}}>{probeCurQ}</div>}
+                {probeStream?<ParsedResult text={probeStream}/>:<Loader label="Thinking it through…"/>}
+              </div>
+            )}
+          </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
