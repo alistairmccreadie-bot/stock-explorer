@@ -50,6 +50,9 @@ const STORAGE_KEYS = {
   glossaryLib: "sx_glossary_library",
   market:      "sx_last_market",
   markets:     "sx_last_markets",
+  portfolio:   "sx_portfolio",
+  profile:     "sx_profile",
+  decision:    "sx_last_decision",
   watchlist:   "sx_watchlist",
 };
 
@@ -57,7 +60,7 @@ const STORAGE_KEYS = {
 // Requests go to our own Worker, which holds the Anthropic key server-side and
 // checks a shared access password. The key is never present in the browser.
 const PROXY_URL = "https://stock-explorer-proxy.alistair-mccreadie.workers.dev";
-const BUILD = "2026-11-17 · market-explorer";  // shown in the footer so you can confirm the live build
+const BUILD = "2026-11-21 · brain+tracker";  // shown in the footer so you can confirm the live build
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
 // Model tiers — route each task to the right capability/cost point.
@@ -2312,10 +2315,196 @@ function MarketsPanel({ apiKey }) {
   );
 }
 
+// ─── PANEL: Decision Brain ────────────────────────────────────────────────────
+const HORIZONS = { short:"short (under ~1 year)", medium:"medium (1-3 year)", long:"long (3+ year)" };
+function DecisionPanel({ apiKey }) {
+  const prof = LS.get(STORAGE_KEYS.profile, {horizon:"long", risk:"balanced"});
+  const saved = LS.get(STORAGE_KEYS.decision);
+  const [horizon,setHorizon] = useState(prof.horizon||"long");
+  const [risk,setRisk]       = useState(prof.risk||"balanced");
+  const [ticker,setTicker]   = useState(saved?.ticker||"");
+  const [result,setResult]   = useState(saved?.result||null);
+  const [sources,setSources] = useState(saved?.sources||null);
+  const [ts,setTs]           = useState(saved?.ts||null);
+  const [loading,setLoading] = useState(false);
+  const [error,setError]     = useState(null);
+  const clearCache=()=>{setResult(null);setSources(null);setTs(null);LS.del(STORAGE_KEYS.decision);};
+  const setProfile=(h,r)=>{ setHorizon(h); setRisk(r); LS.set(STORAGE_KEYS.profile,{horizon:h,risk:r}); };
+
+  const run=useCallback(async(override)=>{
+    const tk=((typeof override==="string"?override:ticker)||"").trim().toUpperCase();
+    if(!tk)return;
+    setLoading(true);setError(null);setResult(null);setSources(null);setTs(null);
+    try{
+      const ctx=await marketContextBlock(apiKey,tk);
+      const port=LS.get(STORAGE_KEYS.portfolio,[]); const held=port.find(p=>p.ticker===tk);
+      const holdNote = held ? ("The investor ALREADY HOLDS "+held.shares+" shares of "+tk+" at an average cost of "+held.cost+(held.px?(" (currently "+held.px+", P/L "+(((held.px-held.cost)/held.cost)*100).toFixed(1)+"%)"):"")+". Frame the recommendation as add / hold / trim / exit on this existing position.\n\n") : "";
+      const sys=buildSys(
+        "You are a seasoned portfolio manager writing a decision brief on a single stock for a self-directed investor with a "+risk+" risk tolerance and a "+HORIZONS[horizon]+" time horizon. Weigh both sides, be specific with real numbers, and take a clear, decisive stance. This is analysis to inform the investor's own decision, not financial advice.",
+        [
+          {h:"Verdict", d:"One line: a clear stance for THIS investor — Attractive / Fair / Expensive / Avoid"+(held?" / Add / Hold / Trim":"")+" — plus a one-sentence reason."},
+          {h:"The Case For", d:"3-4 bullet points — the strongest reasons to own it."},
+          {h:"The Case Against & Key Risks", d:"3-4 bullet points — what could go wrong or make it a poor fit."},
+          {h:"Valuation Check", d:"2-3 sentences: cheap or expensive versus peers and its own history, using the real current multiples."},
+          {h:"Fit for This Investor", d:"2-3 sentences on how it suits a "+risk+" risk tolerance and "+horizon+"-term horizon"+(held?", and what to do with the existing position":"")+"."},
+          {h:"If You Act", d:"Practical considerations (not advice): a sensible entry zone, rough position-size guidance for this risk level, what to monitor, and the price level or event that would invalidate the thesis."},
+        ]
+      );
+      const usr=ctx+holdNote+"Write the decision brief for "+tk+". Follow the required format exactly.";
+      const {text,sources:src}=await callClaude(apiKey,sys,usr,MAX_NARRATIVE,true,setResult,{model:MODEL_DEEP,effort:"high"});
+      const now=Date.now();setResult(text);setSources(src);setTs(now);
+      LS.set(STORAGE_KEYS.decision,{ticker:tk,result:text,sources:src,ts:now});
+    }catch(e){setError(e.message);}finally{setLoading(false);}
+  },[ticker,apiKey,horizon,risk]);
+  const pick=t=>run(t);
+  const sel={background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:13,padding:"9px 12px",outline:"none"};
+
+  return (
+    <div style={{padding:"28px 0"}}>
+      <h2 style={{fontFamily:"Sora,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Decision Brief</h2>
+      <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:16}}>A clear, decisive read on a stock — fused from live data and research, tuned to your horizon and risk, and aware of any position you already hold. Analysis, not advice.</p>
+      <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
+        <span style={{fontSize:12,color:"var(--text-dim)"}}>My profile:</span>
+        <select value={horizon} onChange={e=>setProfile(e.target.value,risk)} style={sel}>
+          <option value="short">Short horizon (&lt;1y)</option>
+          <option value="medium">Medium (1-3y)</option>
+          <option value="long">Long (3y+)</option>
+        </select>
+        <select value={risk} onChange={e=>setProfile(horizon,e.target.value)} style={sel}>
+          <option value="conservative">Conservative</option>
+          <option value="balanced">Balanced</option>
+          <option value="aggressive">Aggressive</option>
+        </select>
+      </div>
+      <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
+        <input placeholder="e.g. NVDA" value={ticker} onChange={e=>setTicker(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&run()} maxLength={12}
+          style={{width:130,background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"10px 14px",outline:"none",fontWeight:600,letterSpacing:".05em",textTransform:"uppercase"}}/>
+        <StarToggle ticker={ticker}/>
+        <button onClick={run} disabled={loading||!ticker.trim()}
+          style={{padding:"10px 22px",borderRadius:"var(--radius-sm)",background:"var(--accent-btn)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:loading||!ticker.trim()?"not-allowed":"pointer",opacity:loading||!ticker.trim()?.5:1}}>
+          {loading?"…":"Build Brief"}
+        </button>
+      </div>
+      <Chips items={EXAMPLE_TICKERS} onClick={t=>setTicker(t)} style={{marginBottom:16}}/>
+      <WatchlistBar onPick={pick}/>
+      {loading&&!result&&<Loader label="Weighing the evidence…"/>}
+      {error&&<div style={{background:"#1e1010",border:"1px solid #4a1e1e",borderRadius:"var(--radius-sm)",color:"var(--danger)",padding:"14px 16px",fontSize:13}}>⚠️ {error}</div>}
+      {result&&<>{ts&&<CachedBanner timestamp={ts} onClear={clearCache}/>}{loading&&<StreamNote/>}<ParsedResult text={result} sources={sources}/></>}
+    </div>
+  );
+}
+
+// ─── PANEL: Portfolio ─────────────────────────────────────────────────────────
+function PortfolioPanel({ apiKey }) {
+  const [rows,setRows]   = useState(()=>LS.get(STORAGE_KEYS.portfolio,[]));
+  const [tk,setTk]       = useState("");
+  const [sh,setSh]       = useState("");
+  const [cost,setCost]   = useState("");
+  const [tgt,setTgt]     = useState("");
+  const [note,setNote]   = useState("");
+  const [busy,setBusy]   = useState(false);
+  const [msg,setMsg]     = useState("");
+  const saveRows=(r)=>{ setRows(r); LS.set(STORAGE_KEYS.portfolio,r); };
+
+  const priceOne=async(t,base)=>{ try{ const q=await marketGet(apiKey,"quote",t); const px=parseFloat(q.close); const r=(base||rows).map(x=>x.ticker===t?{...x,px:isFinite(px)?px:x.px,pxTs:Date.now()}:x); saveRows(r);}catch(_){} };
+  const add=()=>{
+    const t=tk.trim().toUpperCase(), s=parseFloat(sh), c=parseFloat(cost);
+    if(!t||!(s>0)||!(c>=0)){ setMsg("Enter a ticker, a positive number of shares, and an average cost."); return; }
+    const ex=rows.find(r=>r.ticker===t); let r;
+    if(ex){ const ns=ex.shares+s, nc=(ex.shares*ex.cost+s*c)/ns; r=rows.map(x=>x.ticker===t?{...x,shares:ns,cost:nc,target:tgt?parseFloat(tgt):x.target,note:note||x.note}:x); }
+    else { r=[...rows,{ticker:t,shares:s,cost:c,target:tgt?parseFloat(tgt):null,note:note||"",px:null,pxTs:null,ts:Date.now()}]; }
+    saveRows(r); setTk("");setSh("");setCost("");setTgt("");setNote("");setMsg("");
+    priceOne(t,r);
+  };
+  const remove=(t)=>saveRows(rows.filter(r=>r.ticker!==t));
+  const refreshPrices=async()=>{
+    setBusy(true);setMsg(""); const r=rows.map(x=>({...x})); let limited=false;
+    for(const row of r){ try{ const q=await marketGet(apiKey,"quote",row.ticker); const px=parseFloat(q.close); if(isFinite(px)){row.px=px;row.pxTs=Date.now();} setRows([...r]); }
+      catch(e){ if(/rate|429|limit|credit/i.test(e.message||"")){ limited=true; break; } } }
+    saveRows(r); setBusy(false);
+    if(limited) setMsg("Hit the data rate limit — wait a minute and refresh again for the rest.");
+  };
+
+  const priced = rows.map(r=>{ const px=(r.px!=null?r.px:r.cost); const value=r.shares*px; const basis=r.shares*r.cost; const pl=r.px!=null?(value-basis):0; const plPct=basis?pl/basis*100:0; return {...r,_value:value,_basis:basis,_pl:pl,_plPct:plPct}; });
+  const totalValue=priced.reduce((a,r)=>a+r._value,0);
+  const totalCost =priced.reduce((a,r)=>a+r._basis,0);
+  const totalPL=totalValue-totalCost, totalPLpct=totalCost?totalPL/totalCost*100:0;
+  const lastTs=rows.reduce((a,r)=>Math.max(a,r.pxTs||0),0);
+  const th={textAlign:"left",fontSize:11,color:"var(--text-dim)",textTransform:"uppercase",letterSpacing:".04em",padding:"8px 10px",borderBottom:"1px solid var(--border)",whiteSpace:"nowrap"};
+  const td={padding:"10px 10px",borderBottom:"1px solid var(--border)",whiteSpace:"nowrap"};
+  const num={...td,textAlign:"right",fontVariantNumeric:"tabular-nums"};
+  const tile=(label,val,col)=>(<div style={{background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"10px 12px"}}><div style={{fontSize:11,color:"var(--text-dim)",marginBottom:3}}>{label}</div><div style={{fontSize:17,fontWeight:600,fontFamily:"Sora,sans-serif",color:col||"var(--text)"}}>{val}</div></div>);
+  const inp={background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontFamily:"Inter,sans-serif",fontSize:14,padding:"9px 12px",outline:"none"};
+
+  return (
+    <div style={{padding:"28px 0"}}>
+      <h2 style={{fontFamily:"Sora,sans-serif",fontSize:22,fontWeight:700,marginBottom:6,letterSpacing:"-.01em"}}>Portfolio</h2>
+      <p style={{fontSize:14,color:"var(--text-muted)",lineHeight:1.5,marginBottom:20}}>Your holdings with live value and profit/loss. Private to this browser — nothing is shared or sent anywhere except the price lookups.</p>
+
+      {rows.length>0&&(
+        <>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10,marginBottom:14}}>
+            {tile("Total value", fmtBig(totalValue,true))}
+            {tile("Total cost", fmtBig(totalCost,true))}
+            {tile("Total P/L", (totalPL>=0?"+":"")+fmtBig(totalPL,true), totalPL>=0?"var(--accent2)":"var(--danger)")}
+            {tile("Total P/L %", (totalPLpct>=0?"+":"")+fmt2(totalPLpct)+"%", totalPLpct>=0?"var(--accent2)":"var(--danger)")}
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:10}}>
+            <button onClick={refreshPrices} disabled={busy} style={{background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",color:"var(--text)",fontSize:12,fontWeight:600,padding:"6px 12px",cursor:busy?"wait":"pointer",fontFamily:"Inter,sans-serif"}}>{busy?"Refreshing…":"↻ Refresh prices"}</button>
+            {lastTs>0&&<span style={{fontSize:11,color:"var(--text-dim)"}}>Prices as of {new Date(lastTs).toLocaleString("en-AU",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</span>}
+          </div>
+          <div style={{overflowX:"auto",marginBottom:20,border:"1px solid var(--border)",borderRadius:"var(--radius)"}}>
+            <table style={{borderCollapse:"collapse",width:"100%",fontSize:13,background:"var(--surface)"}}>
+              <thead><tr>
+                <th style={th}>Ticker</th><th style={{...th,textAlign:"right"}}>Shares</th><th style={{...th,textAlign:"right"}}>Avg cost</th>
+                <th style={{...th,textAlign:"right"}}>Price</th><th style={{...th,textAlign:"right"}}>Value</th><th style={{...th,textAlign:"right"}}>P/L</th>
+                <th style={{...th,textAlign:"right"}}>Weight</th><th style={{...th,textAlign:"right"}}>Target</th><th style={th}></th>
+              </tr></thead>
+              <tbody>
+                {priced.map(r=>{ const wt=totalValue?r._value/totalValue*100:0; const hot=wt>25;
+                  return (
+                  <tr key={r.ticker}>
+                    <td style={{...td,fontWeight:700,fontFamily:"Sora,sans-serif"}}>{r.ticker}</td>
+                    <td style={num}>{fmtNum(r.shares)}</td>
+                    <td style={num}>{fmtNum(r.cost)}</td>
+                    <td style={num}>{r.px!=null?fmtNum(r.px):"—"}</td>
+                    <td style={num}>{fmtBig(r._value,true)}</td>
+                    <td style={{...num,color:r.px==null?"var(--text-dim)":(r._pl>=0?"var(--accent2)":"var(--danger)")}}>{r.px==null?"—":((r._pl>=0?"+":"")+fmtBig(r._pl,true)+" ("+(r._plPct>=0?"+":"")+fmt2(r._plPct)+"%)")}</td>
+                    <td style={{...num,color:hot?"var(--accent3)":"var(--text-muted)"}}>{fmt2(wt)}%</td>
+                    <td style={num}>{r.target!=null?fmtNum(r.target):"—"}</td>
+                    <td style={{...td,textAlign:"center"}}><button onClick={()=>remove(r.ticker)} title="Remove" style={{background:"none",border:"none",color:"var(--text-dim)",fontSize:15,cursor:"pointer"}}>×</button></td>
+                  </tr>
+                );})}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+      {rows.length===0&&<p style={{fontSize:13,color:"var(--text-dim)",marginBottom:20}}>No holdings yet — add your first position below.</p>}
+
+      <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"16px 18px"}}>
+        <div style={{fontFamily:"Sora,sans-serif",fontSize:14,fontWeight:700,marginBottom:12}}>Add a position</div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+          <input placeholder="Ticker" value={tk} onChange={e=>setTk(e.target.value.toUpperCase())} maxLength={12} style={{...inp,width:100,fontWeight:600,textTransform:"uppercase"}}/>
+          <input placeholder="Shares" value={sh} onChange={e=>setSh(e.target.value)} inputMode="decimal" style={{...inp,width:90}}/>
+          <input placeholder="Avg cost" value={cost} onChange={e=>setCost(e.target.value)} inputMode="decimal" style={{...inp,width:100}}/>
+          <input placeholder="Target (opt)" value={tgt} onChange={e=>setTgt(e.target.value)} inputMode="decimal" style={{...inp,width:110}}/>
+          <input placeholder="Note (opt)" value={note} onChange={e=>setNote(e.target.value)} style={{...inp,flex:1,minWidth:140}} onKeyDown={e=>e.key==="Enter"&&add()}/>
+          <button onClick={add} style={{padding:"9px 20px",borderRadius:"var(--radius-sm)",background:"var(--accent-btn)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:"pointer"}}>Add</button>
+        </div>
+        {msg&&<div style={{fontSize:12,color:"var(--danger)",marginTop:10}}>{msg}</div>}
+        <div style={{fontSize:11,color:"var(--text-dim)",marginTop:10}}>Adding a ticker you already hold averages the new shares into your cost basis.</div>
+      </div>
+    </div>
+  );
+}
+
 // ─── APP ──────────────────────────────────────────────────────────────────────
 const NAV=[
   {id:"chart",   label:"Price & Data",     icon:"📊"},
   {id:"markets", label:"Markets",          icon:"🌐"},
+  {id:"decision",label:"Decision Brief",   icon:"🧭"},
+  {id:"portfolio",label:"Portfolio",       icon:"💼"},
   {id:"movers",  label:"Why Did It Move?", icon:"📈"},
   {id:"research",label:"Company Research",  icon:"🔍"},
   {id:"valuation",label:"Valuation",        icon:"🏷️"},
@@ -2385,6 +2574,8 @@ function App() {
       {tab==="panel"    && <PanelTab      apiKey={apiKey}/>}
       {tab==="chart"    && <ChartPanel    apiKey={apiKey}/>}
       {tab==="markets"  && <MarketsPanel  apiKey={apiKey}/>}
+      {tab==="decision" && <DecisionPanel apiKey={apiKey}/>}
+      {tab==="portfolio"&& <PortfolioPanel apiKey={apiKey}/>}
       {tab==="glossary" && <GlossaryTab apiKey={apiKey}/>}
 
       {/* Disclaimer */}
