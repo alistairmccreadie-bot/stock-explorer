@@ -60,7 +60,7 @@ const STORAGE_KEYS = {
 // Requests go to our own Worker, which holds the Anthropic key server-side and
 // checks a shared access password. The key is never present in the browser.
 const PROXY_URL = "https://stock-explorer-proxy.alistair-mccreadie.workers.dev";
-const BUILD = "2026-11-21 · brain+tracker";  // shown in the footer so you can confirm the live build
+const BUILD = "2026-11-21 · portfolio-edit";  // shown in the footer so you can confirm the live build
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
 // Model tiers — route each task to the right capability/cost point.
@@ -2402,21 +2402,31 @@ function PortfolioPanel({ apiKey }) {
   const [cost,setCost]   = useState("");
   const [tgt,setTgt]     = useState("");
   const [note,setNote]   = useState("");
+  const [editing,setEditing] = useState(null);  // ticker being edited, or null
   const [busy,setBusy]   = useState(false);
   const [msg,setMsg]     = useState("");
   const saveRows=(r)=>{ setRows(r); LS.set(STORAGE_KEYS.portfolio,r); };
+  const clearForm=()=>{ setTk("");setSh("");setCost("");setTgt("");setNote("");setEditing(null);setMsg(""); };
 
   const priceOne=async(t,base)=>{ try{ const q=await marketGet(apiKey,"quote",t); const px=parseFloat(q.close); const r=(base||rows).map(x=>x.ticker===t?{...x,px:isFinite(px)?px:x.px,pxTs:Date.now()}:x); saveRows(r);}catch(_){} };
   const add=()=>{
-    const t=tk.trim().toUpperCase(), s=parseFloat(sh), c=parseFloat(cost);
+    const t=(editing||tk).trim().toUpperCase(), s=parseFloat(sh), c=parseFloat(cost);
     if(!t||!(s>0)||!(c>=0)){ setMsg("Enter a ticker, a positive number of shares, and an average cost."); return; }
-    const ex=rows.find(r=>r.ticker===t); let r;
-    if(ex){ const ns=ex.shares+s, nc=(ex.shares*ex.cost+s*c)/ns; r=rows.map(x=>x.ticker===t?{...x,shares:ns,cost:nc,target:tgt?parseFloat(tgt):x.target,note:note||x.note}:x); }
-    else { r=[...rows,{ticker:t,shares:s,cost:c,target:tgt?parseFloat(tgt):null,note:note||"",px:null,pxTs:null,ts:Date.now()}]; }
-    saveRows(r); setTk("");setSh("");setCost("");setTgt("");setNote("");setMsg("");
+    const tgtN = tgt!==""?parseFloat(tgt):null;
+    let r;
+    if(editing){
+      // Overwrite the edited position exactly (no averaging).
+      r=rows.map(x=>x.ticker===editing?{...x,shares:s,cost:c,target:tgtN,note:note}:x);
+    } else {
+      const ex=rows.find(r=>r.ticker===t);
+      if(ex){ const ns=ex.shares+s, nc=(ex.shares*ex.cost+s*c)/ns; r=rows.map(x=>x.ticker===t?{...x,shares:ns,cost:nc,target:tgtN!=null?tgtN:x.target,note:note||x.note}:x); }
+      else { r=[...rows,{ticker:t,shares:s,cost:c,target:tgtN,note:note,px:null,pxTs:null,ts:Date.now()}]; }
+    }
+    saveRows(r); clearForm();
     priceOne(t,r);
   };
-  const remove=(t)=>saveRows(rows.filter(r=>r.ticker!==t));
+  const startEdit=(row)=>{ setEditing(row.ticker); setTk(row.ticker); setSh(String(row.shares)); setCost(String(row.cost)); setTgt(row.target!=null?String(row.target):""); setNote(row.note||""); setMsg(""); };
+  const remove=(t)=>{ if(editing===t) clearForm(); saveRows(rows.filter(r=>r.ticker!==t)); };
   const refreshPrices=async()=>{
     setBusy(true);setMsg(""); const r=rows.map(x=>({...x})); let limited=false;
     for(const row of r){ try{ const q=await marketGet(apiKey,"quote",row.ticker); const px=parseFloat(q.close); if(isFinite(px)){row.px=px;row.pxTs=Date.now();} setRows([...r]); }
@@ -2472,7 +2482,10 @@ function PortfolioPanel({ apiKey }) {
                     <td style={{...num,color:r.px==null?"var(--text-dim)":(r._pl>=0?"var(--accent2)":"var(--danger)")}}>{r.px==null?"—":((r._pl>=0?"+":"")+fmtBig(r._pl,true)+" ("+(r._plPct>=0?"+":"")+fmt2(r._plPct)+"%)")}</td>
                     <td style={{...num,color:hot?"var(--accent3)":"var(--text-muted)"}}>{fmt2(wt)}%</td>
                     <td style={num}>{r.target!=null?fmtNum(r.target):"—"}</td>
-                    <td style={{...td,textAlign:"center"}}><button onClick={()=>remove(r.ticker)} title="Remove" style={{background:"none",border:"none",color:"var(--text-dim)",fontSize:15,cursor:"pointer"}}>×</button></td>
+                    <td style={{...td,textAlign:"center",whiteSpace:"nowrap"}}>
+                      <button onClick={()=>startEdit(r)} title="Edit" style={{background:"none",border:"none",color:editing===r.ticker?"var(--accent)":"var(--text-dim)",fontSize:13,cursor:"pointer",marginRight:6}}>✎</button>
+                      <button onClick={()=>remove(r.ticker)} title="Remove" style={{background:"none",border:"none",color:"var(--text-dim)",fontSize:15,cursor:"pointer"}}>×</button>
+                    </td>
                   </tr>
                 );})}
               </tbody>
@@ -2482,18 +2495,19 @@ function PortfolioPanel({ apiKey }) {
       )}
       {rows.length===0&&<p style={{fontSize:13,color:"var(--text-dim)",marginBottom:20}}>No holdings yet — add your first position below.</p>}
 
-      <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"16px 18px"}}>
-        <div style={{fontFamily:"Sora,sans-serif",fontSize:14,fontWeight:700,marginBottom:12}}>Add a position</div>
+      <div style={{background:"var(--surface)",border:"1px solid "+(editing?"var(--accent)":"var(--border)"),borderRadius:"var(--radius)",padding:"16px 18px"}}>
+        <div style={{fontFamily:"Sora,sans-serif",fontSize:14,fontWeight:700,marginBottom:12}}>{editing?("Edit "+editing):"Add a position"}</div>
         <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
-          <input placeholder="Ticker" value={tk} onChange={e=>setTk(e.target.value.toUpperCase())} maxLength={12} style={{...inp,width:100,fontWeight:600,textTransform:"uppercase"}}/>
-          <input placeholder="Shares" value={sh} onChange={e=>setSh(e.target.value)} inputMode="decimal" style={{...inp,width:90}}/>
-          <input placeholder="Avg cost" value={cost} onChange={e=>setCost(e.target.value)} inputMode="decimal" style={{...inp,width:100}}/>
-          <input placeholder="Target (opt)" value={tgt} onChange={e=>setTgt(e.target.value)} inputMode="decimal" style={{...inp,width:110}}/>
+          <input placeholder="Ticker" value={tk} onChange={e=>setTk(e.target.value.toUpperCase())} maxLength={12} readOnly={!!editing} style={{...inp,width:100,fontWeight:600,textTransform:"uppercase",opacity:editing?.6:1}}/>
+          <input placeholder="Shares" value={sh} onChange={e=>setSh(e.target.value)} inputMode="decimal" style={{...inp,width:90}} onKeyDown={e=>e.key==="Enter"&&add()}/>
+          <input placeholder="Avg cost" value={cost} onChange={e=>setCost(e.target.value)} inputMode="decimal" style={{...inp,width:100}} onKeyDown={e=>e.key==="Enter"&&add()}/>
+          <input placeholder="Target (opt)" value={tgt} onChange={e=>setTgt(e.target.value)} inputMode="decimal" style={{...inp,width:110}} onKeyDown={e=>e.key==="Enter"&&add()}/>
           <input placeholder="Note (opt)" value={note} onChange={e=>setNote(e.target.value)} style={{...inp,flex:1,minWidth:140}} onKeyDown={e=>e.key==="Enter"&&add()}/>
-          <button onClick={add} style={{padding:"9px 20px",borderRadius:"var(--radius-sm)",background:"var(--accent-btn)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:"pointer"}}>Add</button>
+          <button onClick={add} style={{padding:"9px 20px",borderRadius:"var(--radius-sm)",background:"var(--accent-btn)",color:"#fff",border:"none",fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,cursor:"pointer"}}>{editing?"Save changes":"Add"}</button>
+          {editing&&<button onClick={clearForm} style={{padding:"9px 16px",borderRadius:"var(--radius-sm)",background:"none",border:"1px solid var(--border)",color:"var(--text-muted)",fontFamily:"Inter,sans-serif",fontSize:13,cursor:"pointer"}}>Cancel</button>}
         </div>
         {msg&&<div style={{fontSize:12,color:"var(--danger)",marginTop:10}}>{msg}</div>}
-        <div style={{fontSize:11,color:"var(--text-dim)",marginTop:10}}>Adding a ticker you already hold averages the new shares into your cost basis.</div>
+        <div style={{fontSize:11,color:"var(--text-dim)",marginTop:10}}>{editing?"Editing overwrites this position's figures exactly — no averaging.":"Adding a ticker you already hold averages the new shares into your cost basis. Use the ✎ edit button to correct a position instead."}</div>
       </div>
     </div>
   );
